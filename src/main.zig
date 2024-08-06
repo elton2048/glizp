@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 
 fn log(comptime message: []const u8) !void {
     std.debug.print("[LOG] {s}\n", .{message});
@@ -10,14 +11,14 @@ fn read() ![]const u8 {
 
     // TODO: Currently it reads until the delimiter and put content into
     // memory. And such reading EOF (e.g. C-d) cannot be done yet.
-    // TODO: Using allocator, ArrayList and derived slice instead of array
-    var buffer: [255]u8 = undefined;
+    var mem_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = mem_allocator.allocator();
+    var arrayList = ArrayList(u8).init(allocator);
 
     const stdin = std.io.getStdIn();
+    _ = try stdin.reader().readUntilDelimiterArrayList(&arrayList, '\n', 255);
 
-    const line = try stdin.reader().readUntilDelimiter(&buffer, '\n');
-
-    return line;
+    return arrayList.toOwnedSlice();
 }
 
 fn eval() !void {
