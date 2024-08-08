@@ -5,15 +5,17 @@ fn log(comptime message: []const u8) !void {
     std.debug.print("[LOG] {s}\n", .{message});
 }
 
-fn read() ![]const u8 {
+// read from stdin and store the result via provided allocator.
+fn read(allocator: std.mem.Allocator) ![]const u8 {
     const stdout = std.io.getStdOut();
     try stdout.writeAll("\nuser> ");
 
     // TODO: Currently it reads until the delimiter and put content into
     // memory. And such reading EOF (e.g. C-d) cannot be done yet.
-    var mem_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = mem_allocator.allocator();
     var arrayList = ArrayList(u8).init(allocator);
+    errdefer {
+        arrayList.deinit();
+    }
 
     const stdin = std.io.getStdIn();
     _ = try stdin.reader().readUntilDelimiterArrayList(&arrayList, '\n', 255);
@@ -38,9 +40,14 @@ fn print(string: []const u8) !void {
 }
 
 pub fn rep() !void {
-    const read_result = try read();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    const read_result = try read(allocator);
     try eval();
     try print(read_result);
+
+    allocator.free(read_result);
 }
 
 pub fn main() !void {
