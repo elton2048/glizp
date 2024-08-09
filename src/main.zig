@@ -1,8 +1,27 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 
+// This isn't really an error case but a special case to be handled in
+// parsing byte
+const ByteParsingError = error{
+    EndOfStream,
+    EndOfLine,
+};
+
 fn log(comptime message: []const u8) !void {
     std.debug.print("[LOG] {s}\n", .{message});
+}
+
+fn parsing_byte(reader: std.fs.File.Reader) anyerror!u8 {
+    // TODO: Shift-RET case is not handled yet. It returns same byte
+    // as only RET case, which needs to refer to io part.
+    const byte = reader.readByte() catch |err| switch (err) {
+        error.EndOfStream => return ByteParsingError.EndOfStream,
+        else => |e| return e,
+    };
+    if (byte == '\n') return ByteParsingError.EndOfLine;
+
+    return byte;
 }
 
 // read from stdin and store the result via provided allocator.
@@ -10,15 +29,25 @@ fn read(allocator: std.mem.Allocator) ![]const u8 {
     const stdout = std.io.getStdOut();
     try stdout.writeAll("\nuser> ");
 
-    // TODO: Currently it reads until the delimiter and put content into
-    // memory. And such reading EOF (e.g. C-d) cannot be done yet.
     var arrayList = ArrayList(u8).init(allocator);
     errdefer {
         arrayList.deinit();
     }
 
+    const writer = arrayList.writer();
     const stdin = std.io.getStdIn();
-    _ = try stdin.reader().readUntilDelimiterArrayList(&arrayList, '\n', 255);
+    const reader = stdin.reader();
+
+    while (true) {
+        const byte = parsing_byte(reader) catch |err| switch (err) {
+            ByteParsingError.EndOfLine => break,
+            ByteParsingError.EndOfStream => {
+                std.process.exit(0);
+            },
+            else => |e| return e,
+        };
+        try writer.writeByte(byte);
+    }
 
     return arrayList.toOwnedSlice();
 }
