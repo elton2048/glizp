@@ -156,6 +156,8 @@ pub const KeyCode = enum {
 
     // Control key. Shall be better represented in InputEvent format
     EndOfStream,
+    MetaN,
+    MetaP,
 };
 
 const InputEvent = struct {
@@ -292,6 +294,8 @@ pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
         bytesToU32("\x7e\xff\xff\xff") => KeyError.UnknownBytes, // Shift - `
         bytesToU32("\x7f\xff\xff\xff") => .Backspace,
         //
+        bytesToU32("\x1b\x6e\xff\xff") => .MetaN,
+        bytesToU32("\x1b\x70\xff\xff") => .MetaP,
         bytesToU32("\x1b\x5b\x41\xff") => .ArrowUp,
         bytesToU32("\x1b\x5b\x42\xff") => .ArrowDown,
         bytesToU32("\x1b\x5b\x44\xff") => .ArrowLeft,
