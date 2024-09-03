@@ -93,6 +93,7 @@ fn backspace(stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
     try stdout_writer.writeByte('\u{0008}');
     try stdout_writer.writeByte('\u{0020}');
     try stdout_writer.writeByte('\u{0008}');
+
     try bw.flush();
 
     // Erase the previous byte
@@ -142,7 +143,8 @@ pub const Shell = struct {
     prog_termios: *posix.termios,
 
     // NOTE: history is now disabled.
-    // history: ArrayList([]const u8),
+    history: ArrayList([]u8),
+    history_curr: usize,
 
     // FIXME: enableRawMode could only be run within init now as it will
     // keeps the I/O busy s.t. the shell is struck.
@@ -174,12 +176,19 @@ pub const Shell = struct {
         var prog_termios: posix.termios = undefined;
         prog_termios = orig_termios;
 
+        const historyArrayList = ArrayList([]u8).init(allocator);
+        // errdefer {
+        //     historyArrayList.deinit();
+        // }
+
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
             .stdin = stdin,
             .stdin_fd = &stdin_fd,
             .orig_termios = orig_termios,
             .prog_termios = &prog_termios,
+            .history = historyArrayList,
+            .history_curr = 0,
         };
 
         try self.enableRawMode();
@@ -233,30 +242,75 @@ pub const Shell = struct {
                     return ByteParsingError.EndOfStream;
                 }
                 // Backspace handling
-                if (keycode == .Enter) {
-                    // TODO: Shift-RET case is not handled yet. It returns same byte
-                    // as only RET case, which needs to refer to io part.
+                if (keycode == .Backspace) {
                     if (arrayList.items.len == 0) {
                         continue;
                     }
 
+                    try backspace(stdout, &arrayList);
+                } else if (keycode == .Enter) {
+                    // TODO: Shift-RET case is not handled yet. It returns same byte
+                    // as only RET case, which needs to refer to io part.
                     // NOTE: Need to handle \n byte better
                     try appendByte(stdout, &arrayList, '\n');
                     try backspace(stdout, &arrayList);
                     reading = false;
+                    try self.*.history.append(try arrayList.toOwnedSlice());
+                    // Reset history
+                    self.*.history_curr = self.*.history.items.len - 1;
 
                     continue;
-                }
+                } else if (keycode == .MetaN) {
+                    if (arrayList.items.len != 0) {
+                        try self.*.clearLine(stdout, &arrayList);
+                    }
 
-                // NOTE: Show the byte as in non-ECHO mode, part in Shell later
-                const byte = @tagName(keycode);
-                try appendByte(stdout, &arrayList, byte[0]);
+                    const history_len = self.*.history.items.len;
+                    self.*.history_curr += 1;
+                    if (self.*.history_curr == history_len) {
+                        self.*.history_curr -= 1;
+                        continue;
+                    }
+
+                    const result = self.*.getHistoryItem(self.*.history_curr);
+                    for (result) |byte| {
+                        try appendByte(stdout, &arrayList, byte);
+                    }
+                } else if (keycode == .MetaP) {
+                    if (arrayList.items.len != 0) {
+                        try self.*.clearLine(stdout, &arrayList);
+                    }
+
+                    const result = self.*.getHistoryItem(self.*.history_curr);
+                    if (self.*.history_curr > 0) {
+                        self.*.history_curr -= 1;
+                    }
+
+                    for (result) |byte| {
+                        try appendByte(stdout, &arrayList, byte);
+                    }
+                } else {
+                    // NOTE: Show the byte as in non-ECHO mode, part in Shell later
+                    const byte = @tagName(keycode);
+                    try appendByte(stdout, &arrayList, byte[0]);
+                }
             } else |err| switch (err) {
                 else => |e| return e,
             }
         }
 
         return arrayList.toOwnedSlice();
+    }
+
+    fn getHistoryItem(self: Shell, index: usize) []const u8 {
+        return self.history.items[index];
+    }
+
+    fn clearLine(self: Shell, stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
+        _ = self;
+        for (0..arrayList.items.len) |_| {
+            try backspace(stdout, arrayList);
+        }
     }
 
     fn eval(self: *Shell) !void {
