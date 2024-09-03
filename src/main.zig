@@ -1,15 +1,23 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
+const utils = @import("utils.zig");
+const keymap = @import("keymap_macos.zig");
 
 const ArrayList = std.ArrayList;
 
 // TODO: Provide check for termios based on OS
 const posix = std.posix;
 
+const cc_VTIME = 5;
+const cc_VMIN = 6;
+const INPUT_INTERVAL_IN_MS = 1000;
+const u8_MAX = 255;
+
 // This isn't really an error case but a special case to be handled in
 // parsing byte
 const ByteParsingError = error{
     EndOfStream,
-    EndOfLine,
 };
 
 fn log(comptime message: []const u8) !void {
@@ -24,6 +32,22 @@ fn log_as_utf8(byte: u8) !void {
 
 fn log_pointer(ptr: anytype) !void {
     std.debug.print("[LOG] {*}\n", .{ptr});
+}
+
+// Currently for macOS. Can this cater for other OS?
+// NOTE: How many bytes to represent an input makes sense?
+// Assume key input are in four bytes now.
+// Case: M-n (2 bytes)
+// Case: Arrow key (3 bytes)
+// Case: F5 (5 bytes)
+fn read(reader: std.fs.File.Reader) [4]u8 {
+    var buffer = [4]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
+
+    _ = reader.read(&buffer) catch |err| switch (err) {
+        else => return buffer,
+    };
+
+    return buffer;
 }
 
 /// Parsing function, which could be a part of Parser later
@@ -52,27 +76,11 @@ fn log_pointer(ptr: anytype) !void {
 ///
 /// See tui/input.c and os/input.c for more.
 /// For keycode, see keycodes.h
-fn parsing_byte(reader: std.fs.File.Reader) anyerror!u8 {
-    // TODO: Possible refactoring for using keymap.
-    const byte = reader.readByte() catch |err| switch (err) {
-        error.EndOfStream => return ByteParsingError.EndOfStream,
-        else => |e| return e,
-    };
+fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.KeyCode {
+    const bytes = read(reader);
+    const keyCode = keymap.mapByteToKeyCode(bytes);
 
-    // Check if escape character
-    if (byte == '\u{001b}') {
-        const byte_after = reader.readByte() catch |err| switch (err) {
-            else => |e| return e,
-        };
-        // Prepare for returning case about composited key binding
-        _ = byte_after;
-    }
-    if (byte == '\u{0004}') return ByteParsingError.EndOfStream;
-    // TODO: Shift-RET case is not handled yet. It returns same byte
-    // as only RET case, which needs to refer to io part.
-    if (byte == '\n') return ByteParsingError.EndOfLine;
-
-    return byte;
+    return keyCode;
 }
 
 // backspace function aligns both stdout and array list to store byte.
@@ -146,6 +154,9 @@ pub const Shell = struct {
             .ECHO = false,
         };
 
+        prog_termios.cc[cc_VMIN] = 0;
+        prog_termios.cc[cc_VTIME] = 0;
+
         posix.tcsetattr(stdin_fd.*, .NOW, prog_termios.*) catch @panic("Cannot access termios");
     }
 
@@ -214,25 +225,33 @@ pub const Shell = struct {
         var reading = true;
 
         while (reading) {
-            if (parsing_byte(reader)) |byte| {
+            if (parsing_byte(reader)) |keycode| {
+                if (keycode == .EndOfStream) {
+                    reading = false;
+
+                    // TODO: Prevent using error to handle this?
+                    return ByteParsingError.EndOfStream;
+                }
                 // Backspace handling
-                if (byte == '\u{007f}') {
+                if (keycode == .Enter) {
+                    // TODO: Shift-RET case is not handled yet. It returns same byte
+                    // as only RET case, which needs to refer to io part.
                     if (arrayList.items.len == 0) {
                         continue;
                     }
 
+                    // NOTE: Need to handle \n byte better
+                    try appendByte(stdout, &arrayList, '\n');
                     try backspace(stdout, &arrayList);
+                    reading = false;
 
                     continue;
                 }
 
                 // NOTE: Show the byte as in non-ECHO mode, part in Shell later
-                try appendByte(stdout, &arrayList, byte);
+                const byte = @tagName(keycode);
+                try appendByte(stdout, &arrayList, byte[0]);
             } else |err| switch (err) {
-                ByteParsingError.EndOfLine => {
-                    try appendByte(stdout, null, '\n');
-                    reading = false;
-                },
                 else => |e| return e,
             }
         }
