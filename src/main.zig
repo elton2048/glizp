@@ -1,6 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const logz = @import("logz");
+
 const utils = @import("utils.zig");
 const keymap = @import("keymap_macos.zig");
 
@@ -76,6 +78,7 @@ fn read(reader: std.fs.File.Reader) [4]u8 {
 ///
 /// See tui/input.c and os/input.c for more.
 /// For keycode, see keycodes.h
+/// TODO: Support emoji case, which is not KeyCode actually.
 fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.KeyCode {
     const bytes = read(reader);
     const keyCode = keymap.mapByteToKeyCode(bytes);
@@ -142,9 +145,17 @@ pub const Shell = struct {
     orig_termios: posix.termios,
     prog_termios: *posix.termios,
 
-    // NOTE: history is now disabled.
     history: ArrayList([]u8),
     history_curr: usize,
+
+    // As (logz) logger is not thread-safe, using a pool for the use
+    // of the logger.
+    // It is the same as calling the pool
+    // (by calling "logz" method directly, e.g. logz.info())
+    // and log accordingly.
+    // TODO: Using a generic logger to decouple with logz if needed,
+    // for example supporting log/metrics through network service?
+    logger: *logz.Pool,
 
     // FIXME: enableRawMode could only be run within init now as it will
     // keeps the I/O busy s.t. the shell is struck.
@@ -169,6 +180,19 @@ pub const Shell = struct {
     }
 
     pub fn init(allocator: std.mem.Allocator) *Shell {
+        // NOTE: Currently the logger cannot be configured to log in
+        // multiple outputs (like stdout then file)
+        logz.setup(allocator, .{
+            .pool_size = 2,
+            .buffer_size = 4096,
+            .level = .Debug,
+            // .output = .stdout,
+            .output = .{ .file = "glizp.log" },
+        }) catch @panic("cannot initialize log manager");
+
+        const logger = logz.logger().pool;
+        // defer logz.deinit();
+
         const stdin = std.io.getStdIn();
         const stdin_fd = stdin.handle;
 
@@ -189,6 +213,7 @@ pub const Shell = struct {
             .prog_termios = &prog_termios,
             .history = historyArrayList,
             .history_curr = 0,
+            .logger = logger,
         };
 
         try self.enableRawMode();
@@ -213,7 +238,6 @@ pub const Shell = struct {
 
     // read from stdin and store the result via provided allocator.
     fn read(self: *Shell, allocator: std.mem.Allocator) ![]const u8 {
-        // _ = self;
         // NOTE: The reading from stdin is now having two writer for different
         // ends. One is for stdout to display; Another is Arraylist to store
         // the string. Is this a good way to handle?
@@ -235,6 +259,11 @@ pub const Shell = struct {
 
         while (reading) {
             if (parsing_byte(reader)) |keycode| {
+                self.logger.logger()
+                    .fmt("[LOG]", "keycode: {any}", .{keycode})
+                    .level(.Debug)
+                    .log();
+
                 if (keycode == .EndOfStream) {
                     reading = false;
 
