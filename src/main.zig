@@ -295,6 +295,10 @@ pub const Shell = struct {
                     }
 
                     const history_len = self.*.history.items.len;
+                    if (history_len == 0) {
+                        continue;
+                    }
+
                     self.*.history_curr += 1;
                     if (self.*.history_curr == history_len) {
                         self.*.history_curr -= 1;
@@ -308,6 +312,11 @@ pub const Shell = struct {
                 } else if (keycode == .MetaP) {
                     if (arrayList.items.len != 0) {
                         try self.*.clearLine(stdout, &arrayList);
+                    }
+
+                    const history_len = self.*.history.items.len;
+                    if (history_len == 0) {
+                        continue;
                     }
 
                     const result = self.*.getHistoryItem(self.*.history_curr);
