@@ -1,0 +1,14 @@
+.{
+    .name = "glizp",
+    .version = "0.0.1",
+
+    .dependencies = .{
+        .logz = .{
+            .url = "https://github.com/karlseguin/log.zig/archive/97d0818270a357d3ce7bc878abc32dc996fe78ff.tar.gz",
+            .hash = "1220c032d828e768348b321a79523812be1c4cb27e1eb7ff5df54b573fa131afd448",
+        },
+    },
+    .paths = .{
+        "",
+    },
+}
