@@ -278,13 +278,20 @@ pub const Shell = struct {
 
                     try backspace(stdout, &arrayList);
                 } else if (keycode == .Enter) {
+                    const input_result = try arrayList.toOwnedSlice();
+
                     // TODO: Shift-RET case is not handled yet. It returns same byte
                     // as only RET case, which needs to refer to io part.
                     // NOTE: Need to handle \n byte better
                     try appendByte(stdout, &arrayList, '\n');
                     try backspace(stdout, &arrayList);
                     reading = false;
-                    try self.*.history.append(try arrayList.toOwnedSlice());
+
+                    if (input_result.len == 0) {
+                        continue;
+                    }
+
+                    try self.*.history.append(input_result);
                     // Reset history
                     self.*.history_curr = self.*.history.items.len - 1;
 
