@@ -11,6 +11,14 @@ pub const KeyError = error{
     UnknownBytes,
 };
 
+pub const FunctionalKey = enum(u8) {
+    KeyNull,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+};
+
 // NOTE: ASCII reserves the first 32 code points
 // (numbers 0–31 decimal) and the last one (number 127 decimal) for
 // control characters.
@@ -75,6 +83,11 @@ pub const CharKey = enum(u8) {
 
     BackQuote = 0x60,
     Backspace = 0x7f,
+};
+
+pub const Key = union(enum) {
+    char: CharKey,
+    functional: FunctionalKey,
 };
 
 const charKeyValues = valuesFromEnum(u8, CharKey);
@@ -252,7 +265,7 @@ pub const InputEvent = struct {
     alt: bool,
     shift: bool,
     meta: bool,
-    key: CharKey,
+    key: Key,
     raw: []u8,
 
     // NOTE: Using pointer for input param as dynamic bytes causing
@@ -323,16 +336,38 @@ pub const InputEvent = struct {
             key_bits_layer = 0b0011111;
         }
 
+        var genericKey: Key = undefined;
+        var charKey: CharKey = undefined;
+        var functionalKey: FunctionalKey = .KeyNull;
+
         // NOTE: Manual handling to check if the byte returned is in
         // CharKey enum defination or not as there is no easy handling
         // using @enumFromInt now. Fallback to null key for undefined
         // case
         const _charKey = (key_byte & key_bits_layer);
-        var charKey: CharKey = undefined;
         if (std.mem.indexOf(u8, charKeyValues, &[_]u8{_charKey})) |_| {
             charKey = @enumFromInt(_charKey);
+            genericKey = .{ .char = charKey };
         } else {
             charKey = .KeyNull;
+        }
+
+        // TODO: Hardcoded for now
+        if (inputEvent.raw.len == 3) {
+            if (bytes[0] == 0x1b and bytes[1] == 0x5b) {
+                const curr = bytes[2];
+
+                if (curr == 0x41) {
+                    functionalKey = .ArrowUp;
+                } else if (curr == 0x42) {
+                    functionalKey = .ArrowDown;
+                } else if (curr == 0x43) {
+                    functionalKey = .ArrowRight;
+                } else if (curr == 0x44) {
+                    functionalKey = .ArrowLeft;
+                }
+            }
+            genericKey = .{ .functional = functionalKey };
         }
 
         // TODO: Decide the condition of these modifier keys
@@ -342,7 +377,7 @@ pub const InputEvent = struct {
         inputEvent.alt = alt;
         inputEvent.shift = shift;
         inputEvent.meta = meta;
-        inputEvent.key = charKey;
+        inputEvent.key = genericKey;
 
         return inputEvent.*;
     }
@@ -487,59 +522,65 @@ pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
 
 test "InputEvent" {
     const inputEventKeyA = InputEvent.init(&u32ToBytes("\x41\xff\xff\xff"));
-    assert(inputEventKeyA.key == .A);
+    assert(inputEventKeyA.key.char == .A);
     assert(inputEventKeyA.ctrl == false);
     assert(inputEventKeyA.alt == false);
     assert(inputEventKeyA.shift == true);
     assert(std.mem.eql(u8, inputEventKeyA.raw, "\x41"));
 
     const inputEventKeya = InputEvent.init(&u32ToBytes("\x61\xff\xff\xff"));
-    assert(inputEventKeya.key == .A);
+    assert(inputEventKeya.key.char == .A);
     assert(inputEventKeya.ctrl == false);
     assert(inputEventKeya.alt == false);
     assert(inputEventKeya.shift == false);
     assert(std.mem.eql(u8, inputEventKeya.raw, "\x61"));
 
     const inputEventKeyZ = InputEvent.init(&u32ToBytes("\x5a\xff\xff\xff"));
-    assert(inputEventKeyZ.key == .Z);
+    assert(inputEventKeyZ.key.char == .Z);
     assert(inputEventKeyZ.ctrl == false);
     assert(inputEventKeyZ.alt == false);
     assert(inputEventKeyZ.shift == true);
     assert(std.mem.eql(u8, inputEventKeyZ.raw, "\x5a"));
 
     const inputEventEof = InputEvent.init(&u32ToBytes("\x04\xff\xff\xff"));
-    assert(inputEventEof.key == .D);
+    assert(inputEventEof.key.char == .D);
     assert(inputEventEof.ctrl == true);
     assert(inputEventEof.alt == false);
     assert(inputEventEof.shift == false);
 
     const inputEventEscape = InputEvent.init(&u32ToBytes("\x1b\xff\xff\xff"));
-    assert(inputEventEscape.key == .Escape);
+    assert(inputEventEscape.key.char == .Escape);
     assert(inputEventEscape.ctrl == true);
     assert(inputEventEscape.alt == false);
     assert(inputEventEscape.shift == false);
 
     const inputEventEscapeShort = InputEvent.init(&u32ToBytes("\x1b"));
-    assert(inputEventEscapeShort.key == .Escape);
+    assert(inputEventEscapeShort.key.char == .Escape);
     assert(std.mem.eql(u8, inputEventEscapeShort.raw, "\x1b"));
 
     const inputEventKey0Short = InputEvent.init(&u32ToBytes("\x30"));
-    assert(inputEventKey0Short.key == .Key0);
+    assert(inputEventKey0Short.key.char == .Key0);
     assert(std.mem.eql(u8, inputEventKey0Short.raw, "\x30"));
 
     const inputEventKey9Short = InputEvent.init(&u32ToBytes("\x39"));
-    assert(inputEventKey9Short.key == .Key9);
+    assert(inputEventKey9Short.key.char == .Key9);
     assert(std.mem.eql(u8, inputEventKey9Short.raw, "\x39"));
 
     const inputEventSpace = InputEvent.init(&u32ToBytes("\x20\xff\xff\xff"));
-    assert(inputEventSpace.key == .Space);
+    assert(inputEventSpace.key.char == .Space);
     assert(std.mem.eql(u8, inputEventSpace.raw, "\x20"));
 
     const inputEventBackspaceShort = InputEvent.init(&u32ToBytes("\x7f"));
-    assert(inputEventBackspaceShort.key == .Backspace);
+    assert(inputEventBackspaceShort.key.char == .Backspace);
     assert(std.mem.eql(u8, inputEventBackspaceShort.raw, "\x7f"));
 
     const inputEventMetaN = InputEvent.init(&u32ToBytes("\x1b\x6e\xff\xff"));
     assert(inputEventMetaN.ctrl == false);
     assert(inputEventMetaN.alt == true);
+
+    const inputEventArrowUp = InputEvent.init(&u32ToBytes("\x1b\x5b\x41\xff"));
+    assert(inputEventArrowUp.ctrl == false);
+    assert(inputEventArrowUp.alt == false);
+    assert(inputEventArrowUp.key.functional == .ArrowUp);
+    assert(std.mem.eql(u8, inputEventArrowUp.raw, "\x1b\x5b\x41"));
 }

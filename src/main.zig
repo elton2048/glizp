@@ -255,82 +255,85 @@ pub const Shell = struct {
                     .level(.Debug)
                     .log();
 
-                if (inputEvent.ctrl) {
-                    if (inputEvent.key == .D) {
-                        reading = false;
+                switch (inputEvent.key) {
+                    .char => |key| {
+                        if (inputEvent.ctrl and key == .D) {
+                            reading = false;
 
-                        // TODO: Prevent using error to handle this?
-                        return ByteParsingError.EndOfStream;
-                    }
-                }
-
-                // Backspace handling
-                if (inputEvent.key == .Backspace) {
-                    if (arrayList.items.len == 0) {
-                        continue;
-                    }
-
-                    try backspace(stdout, &arrayList);
-                } else if (inputEvent.ctrl and inputEvent.key == .J) {
-                    const input_result = try arrayList.toOwnedSlice();
-
-                    // TODO: Shift-RET case is not handled yet. It returns same byte
-                    // as only RET case, which needs to refer to io part.
-                    // NOTE: Need to handle \n byte better
-                    try appendByte(stdout, &arrayList, '\n');
-                    try backspace(stdout, &arrayList);
-                    reading = false;
-
-                    if (input_result.len == 0) {
-                        continue;
-                    }
-
-                    try self.*.history.append(input_result);
-                    // Reset history
-                    self.*.history_curr = self.*.history.items.len - 1;
-
-                    continue;
-                } else if (inputEvent.alt) {
-                    // Fetch history result, the current history cursor
-                    // points to the last one if there is no history
-                    // navigating function run before.
-                    if (inputEvent.key == .N or inputEvent.key == .P) {
-                        if (arrayList.items.len != 0) {
-                            try self.*.clearLine(stdout, &arrayList);
+                            // TODO: Prevent using error to handle this?
+                            return ByteParsingError.EndOfStream;
                         }
 
-                        const history_len = self.*.history.items.len;
-                        if (history_len == 0) {
-                            continue;
-                        }
-
-                        // Return the next one
-                        if (inputEvent.key == .N) {
-                            self.*.history_curr += 1;
-                            if (self.*.history_curr == history_len) {
-                                self.*.history_curr -= 1;
+                        // Backspace handling
+                        if (key == .Backspace) {
+                            // TODO: Functional key instead?
+                            if (arrayList.items.len == 0) {
                                 continue;
                             }
-                        }
 
-                        const result = self.*.getHistoryItem(self.*.history_curr);
-                        for (result) |byte| {
-                            try appendByte(stdout, &arrayList, byte);
-                        }
+                            try backspace(stdout, &arrayList);
+                        } else if (inputEvent.ctrl and key == .J) {
+                            const input_result = try arrayList.toOwnedSlice();
 
-                        // Set to the previous one
-                        if (inputEvent.key == .P) {
-                            if (self.*.history_curr > 0) {
-                                self.*.history_curr -= 1;
+                            // TODO: Shift-RET case is not handled yet. It returns same byte
+                            // as only RET case, which needs to refer to io part.
+                            // NOTE: Need to handle \n byte better
+                            try appendByte(stdout, &arrayList, '\n');
+                            try backspace(stdout, &arrayList);
+                            reading = false;
+
+                            if (input_result.len == 0) {
+                                continue;
+                            }
+
+                            try self.*.history.append(input_result);
+                            // Reset history
+                            self.*.history_curr = self.*.history.items.len - 1;
+
+                            continue;
+                        } else if (inputEvent.alt) {
+                            // Fetch history result, the current history cursor
+                            // points to the last one if there is no history
+                            // navigating function run before.
+                            if (key == .N or key == .P) {
+                                if (arrayList.items.len != 0) {
+                                    try self.*.clearLine(stdout, &arrayList);
+                                }
+
+                                const history_len = self.*.history.items.len;
+                                if (history_len == 0) {
+                                    continue;
+                                }
+
+                                // Return the next one
+                                if (key == .N) {
+                                    self.*.history_curr += 1;
+                                    if (self.*.history_curr == history_len) {
+                                        self.*.history_curr -= 1;
+                                        continue;
+                                    }
+                                }
+
+                                const result = self.*.getHistoryItem(self.*.history_curr);
+                                for (result) |byte| {
+                                    try appendByte(stdout, &arrayList, byte);
+                                }
+
+                                // Set to the previous one
+                                if (key == .P) {
+                                    if (self.*.history_curr > 0) {
+                                        self.*.history_curr -= 1;
+                                    }
+                                }
+                            }
+                        } else {
+                            const bytes = inputEvent.raw;
+                            for (bytes) |byte| {
+                                try appendByte(stdout, &arrayList, byte);
                             }
                         }
-                    }
-                } else {
-                    // NOTE: Show the byte as in non-ECHO mode, part in Shell later
-                    const bytes = inputEvent.raw;
-                    for (bytes) |byte| {
-                        try appendByte(stdout, &arrayList, byte);
-                    }
+                    },
+                    .functional => continue,
                 }
             } else |err| switch (err) {
                 else => |e| return e,
