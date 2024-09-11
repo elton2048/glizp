@@ -5,6 +5,8 @@ const logz = @import("logz");
 
 const utils = @import("utils.zig");
 const keymap = @import("keymap_macos.zig");
+const constants = @import("constants.zig");
+const u8_MAX = constants.u8_MAX;
 
 const ArrayList = std.ArrayList;
 
@@ -14,7 +16,10 @@ const posix = std.posix;
 const cc_VTIME = 5;
 const cc_VMIN = 6;
 const INPUT_INTERVAL_IN_MS = 1000;
-const u8_MAX = 255;
+
+// NOTE: Shall be OS-dependent, to support different emoji it may require
+// to be 8 too.
+const INPUT_BYTE_SIZE = 4;
 
 // This isn't really an error case but a special case to be handled in
 // parsing byte
@@ -22,28 +27,14 @@ const ByteParsingError = error{
     EndOfStream,
 };
 
-fn log(comptime message: []const u8) !void {
-    std.debug.print("[LOG] {s}\n", .{message});
-}
-
-fn log_as_utf8(byte: u8) !void {
-    var byte_out = [4]u8{ 0, 0, 0, 0 };
-    _ = try std.unicode.utf8Encode(byte, &byte_out);
-    std.debug.print("[LOG] {x}\n", .{byte_out});
-}
-
-fn log_pointer(ptr: anytype) !void {
-    std.debug.print("[LOG] {*}\n", .{ptr});
-}
-
 // Currently for macOS. Can this cater for other OS?
 // NOTE: How many bytes to represent an input makes sense?
 // Assume key input are in four bytes now.
 // Case: M-n (2 bytes)
 // Case: Arrow key (3 bytes)
 // Case: F5 (5 bytes)
-fn read(reader: std.fs.File.Reader) [4]u8 {
-    var buffer = [4]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
+fn read(reader: std.fs.File.Reader) [INPUT_BYTE_SIZE]u8 {
+    var buffer = [INPUT_BYTE_SIZE]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
 
     _ = reader.read(&buffer) catch |err| switch (err) {
         else => return buffer,
@@ -78,16 +69,16 @@ fn read(reader: std.fs.File.Reader) [4]u8 {
 ///
 /// See tui/input.c and os/input.c for more.
 /// For keycode, see keycodes.h
-/// TODO: Support emoji case, which is not KeyCode actually.
-fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.KeyCode {
+fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.InputEvent {
     const bytes = read(reader);
-    const keyCode = keymap.mapByteToKeyCode(bytes);
+    const inputEvent = keymap.InputEvent.init(&bytes);
 
-    return keyCode;
+    return inputEvent;
 }
 
 // backspace function aligns both stdout and array list to store byte.
 // wrapped corresponding params into struct later.
+// TODO: For multiple bytes case it is incorrect now, like emoji input.
 fn backspace(stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
@@ -258,26 +249,29 @@ pub const Shell = struct {
         var reading = true;
 
         while (reading) {
-            if (parsing_byte(reader)) |keycode| {
+            if (parsing_byte(reader)) |inputEvent| {
                 self.logger.logger()
-                    .fmt("[LOG]", "keycode: {any}", .{keycode})
+                    .fmt("[LOG]", "InputEvent: {any}", .{inputEvent})
                     .level(.Debug)
                     .log();
 
-                if (keycode == .EndOfStream) {
-                    reading = false;
+                if (inputEvent.ctrl) {
+                    if (inputEvent.key == .D) {
+                        reading = false;
 
-                    // TODO: Prevent using error to handle this?
-                    return ByteParsingError.EndOfStream;
+                        // TODO: Prevent using error to handle this?
+                        return ByteParsingError.EndOfStream;
+                    }
                 }
+
                 // Backspace handling
-                if (keycode == .Backspace) {
+                if (inputEvent.key == .Backspace) {
                     if (arrayList.items.len == 0) {
                         continue;
                     }
 
                     try backspace(stdout, &arrayList);
-                } else if (keycode == .Enter) {
+                } else if (inputEvent.ctrl and inputEvent.key == .J) {
                     const input_result = try arrayList.toOwnedSlice();
 
                     // TODO: Shift-RET case is not handled yet. It returns same byte
@@ -296,48 +290,47 @@ pub const Shell = struct {
                     self.*.history_curr = self.*.history.items.len - 1;
 
                     continue;
-                } else if (keycode == .MetaN) {
-                    if (arrayList.items.len != 0) {
-                        try self.*.clearLine(stdout, &arrayList);
-                    }
+                } else if (inputEvent.alt) {
+                    // Fetch history result, the current history cursor
+                    // points to the last one if there is no history
+                    // navigating function run before.
+                    if (inputEvent.key == .N or inputEvent.key == .P) {
+                        if (arrayList.items.len != 0) {
+                            try self.*.clearLine(stdout, &arrayList);
+                        }
 
-                    const history_len = self.*.history.items.len;
-                    if (history_len == 0) {
-                        continue;
-                    }
+                        const history_len = self.*.history.items.len;
+                        if (history_len == 0) {
+                            continue;
+                        }
 
-                    self.*.history_curr += 1;
-                    if (self.*.history_curr == history_len) {
-                        self.*.history_curr -= 1;
-                        continue;
-                    }
+                        // Return the next one
+                        if (inputEvent.key == .N) {
+                            self.*.history_curr += 1;
+                            if (self.*.history_curr == history_len) {
+                                self.*.history_curr -= 1;
+                                continue;
+                            }
+                        }
 
-                    const result = self.*.getHistoryItem(self.*.history_curr);
-                    for (result) |byte| {
-                        try appendByte(stdout, &arrayList, byte);
-                    }
-                } else if (keycode == .MetaP) {
-                    if (arrayList.items.len != 0) {
-                        try self.*.clearLine(stdout, &arrayList);
-                    }
+                        const result = self.*.getHistoryItem(self.*.history_curr);
+                        for (result) |byte| {
+                            try appendByte(stdout, &arrayList, byte);
+                        }
 
-                    const history_len = self.*.history.items.len;
-                    if (history_len == 0) {
-                        continue;
-                    }
-
-                    const result = self.*.getHistoryItem(self.*.history_curr);
-                    if (self.*.history_curr > 0) {
-                        self.*.history_curr -= 1;
-                    }
-
-                    for (result) |byte| {
-                        try appendByte(stdout, &arrayList, byte);
+                        // Set to the previous one
+                        if (inputEvent.key == .P) {
+                            if (self.*.history_curr > 0) {
+                                self.*.history_curr -= 1;
+                            }
+                        }
                     }
                 } else {
                     // NOTE: Show the byte as in non-ECHO mode, part in Shell later
-                    const byte = @tagName(keycode);
-                    try appendByte(stdout, &arrayList, byte[0]);
+                    const bytes = inputEvent.raw;
+                    for (bytes) |byte| {
+                        try appendByte(stdout, &arrayList, byte);
+                    }
                 }
             } else |err| switch (err) {
                 else => |e| return e,
