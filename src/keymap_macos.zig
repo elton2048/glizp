@@ -1,8 +1,96 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
+const constants = @import("constants.zig");
+const u8_MAX = constants.u8_MAX;
+
+const valuesFromEnum = @import("utils.zig").valuesFromEnum;
+const log = @import("utils.zig").log;
 
 pub const KeyError = error{
     UnknownBytes,
 };
+
+pub const FunctionalKey = enum(u8) {
+    KeyNull,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+};
+
+// NOTE: ASCII reserves the first 32 code points
+// (numbers 0–31 decimal) and the last one (number 127 decimal) for
+// control characters.
+// From 1-26 it corresponds to A-Z with Ctrl key.
+pub const CharKey = enum(u8) {
+    KeyNull,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    Escape,
+
+    // Extended character
+    // TODO: How to handle characters with shift? Should they be mapped
+    // into explicit character?
+    Space = 0x20,
+
+    Quote = 0x27,
+    BracketLeft = 0x28,
+    BracketRight = 0x29,
+    Dash = 0x2d,
+    Dot = 0x2e,
+    Slash = 0x2f,
+    Key0 = 0x30,
+    Key1,
+    Key2,
+    Key3,
+    Key4,
+    Key5,
+    Key6,
+    Key7,
+    Key8,
+    Key9,
+    SemiColon = 0x3b,
+    Equal = 0x3d,
+
+    BracketSquareLeft = 0x5b,
+    BackSlash = 0x5c,
+    BracketSquareRight = 0x5d,
+
+    BackQuote = 0x60,
+    Backspace = 0x7f,
+};
+
+pub const Key = union(enum) {
+    char: CharKey,
+    functional: FunctionalKey,
+};
+
+const charKeyValues = valuesFromEnum(u8, CharKey);
 
 // Currently using simple key code
 // Consider using InputEvent below for a more generic way
@@ -160,20 +248,139 @@ pub const KeyCode = enum {
     MetaP,
 };
 
-const InputEvent = struct {
-    // Note:
+pub const InputEvent = struct {
+    // ASCII Note:
     // 0_0000001
     // Little Endian
     // [6]Ctrl to be 0
     // [5]Shift to be 0
     // ^[ for Alt/Escape key
+    // 011: no ctrl and shift
+    // 010: no ctrl and yes shift
+    // 001: Use as char extension.
+    // 000: yes ctrl and no shift
+    // Default with Ctrl; 010 to change with Shift; 011 Disable both keys
 
     ctrl: bool,
     alt: bool,
     shift: bool,
     meta: bool,
-    key: KeyCode,
-    raw: u8,
+    key: Key,
+    raw: []u8,
+
+    // NOTE: Using pointer for input param as dynamic bytes causing
+    // dereferencing after return.
+    pub fn init(bytes: []const u8) InputEvent {
+        // Put the value(particularlly bytes) into heap memory to ensure
+        // value persist.
+        // NOTE: Accept using external allocator would be a more common way
+        // and makes "the caller owns the returned memory",
+        // but it makes the call more complicated.
+        var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator_g = gpa_allocator.allocator();
+        const inputEvent = allocator_g.create(InputEvent) catch @panic("OOM");
+
+        var end_pos: u8 = 0;
+        for (bytes) |byte| {
+            if (byte != u8_MAX) {
+                end_pos += 1;
+            } else {
+                break;
+            }
+        }
+
+        const result = allocator_g.alloc(u8, end_pos) catch @panic("OOM");
+        @memcpy(result[0..end_pos], bytes[0..end_pos]);
+        inputEvent.raw = @constCast(result);
+
+        var alt = false;
+
+        // TODO: Complex handling for non-single byte case
+        // e.g. Alt composite keys
+        var key_byte: u8 = undefined;
+        // TODO: Handle other raw bytes length cases
+        if (inputEvent.raw.len == 1) {
+            key_byte = bytes[0];
+        } else if (inputEvent.raw.len == 2) {
+            // Escape code for alt key in composite keys
+            if (bytes[0] == 0x1b) {
+                alt = true;
+            }
+            key_byte = bytes[1];
+        }
+
+        // TODO: Symbol would be complicated(?)
+        // NOTE: Ctrl-I/J/M/Q maps to another code in macOS
+        var ctrl = (key_byte & 0b1000000) >> 6 == 0;
+        const extend = (key_byte & 0b0100000) >> 5 == 1;
+        var shift = !ctrl and !extend;
+
+        // TODO: Is exceptional a good way?
+        const exceptional_chars = [_]u8{
+            @intFromEnum(CharKey.BracketSquareLeft),
+            @intFromEnum(CharKey.BracketSquareRight),
+            @intFromEnum(CharKey.Backspace),
+        };
+
+        var key_bits_layer: u8 = undefined;
+        if (std.mem.indexOf(u8, &exceptional_chars, &[_]u8{key_byte})) |_| {
+            // For exceptional chars, fix to have shift is false now.
+            shift = false;
+            key_bits_layer = 0b1111111;
+        } else if (ctrl and extend) {
+            // Extend to read another set of printable character
+            key_bits_layer = 0b0111111;
+            ctrl = false;
+        } else {
+            // For 26 Latin character
+            key_bits_layer = 0b0011111;
+        }
+
+        var genericKey: Key = undefined;
+        var charKey: CharKey = undefined;
+        var functionalKey: FunctionalKey = .KeyNull;
+
+        // NOTE: Manual handling to check if the byte returned is in
+        // CharKey enum defination or not as there is no easy handling
+        // using @enumFromInt now. Fallback to null key for undefined
+        // case
+        const _charKey = (key_byte & key_bits_layer);
+        if (std.mem.indexOf(u8, charKeyValues, &[_]u8{_charKey})) |_| {
+            charKey = @enumFromInt(_charKey);
+            genericKey = .{ .char = charKey };
+        } else {
+            charKey = .KeyNull;
+        }
+
+        // TODO: Hardcoded for now
+        if (inputEvent.raw.len == 3) {
+            if (bytes[0] == 0x1b and bytes[1] == 0x5b) {
+                const curr = bytes[2];
+
+                if (curr == 0x41) {
+                    functionalKey = .ArrowUp;
+                } else if (curr == 0x42) {
+                    functionalKey = .ArrowDown;
+                } else if (curr == 0x43) {
+                    functionalKey = .ArrowRight;
+                } else if (curr == 0x44) {
+                    functionalKey = .ArrowLeft;
+                }
+            }
+            genericKey = .{ .functional = functionalKey };
+        }
+
+        // TODO: Decide the condition of these modifier keys
+        const meta = false;
+
+        inputEvent.ctrl = ctrl;
+        inputEvent.alt = alt;
+        inputEvent.shift = shift;
+        inputEvent.meta = meta;
+        inputEvent.key = genericKey;
+
+        return inputEvent.*;
+    }
 };
 
 fn bytesToU32(bytes: []const u8) u32 {
@@ -182,6 +389,15 @@ fn bytesToU32(bytes: []const u8) u32 {
     const byte_u32 = btv(u32, bytes);
 
     return byte_u32;
+}
+
+fn u32ToBytes(str: []const u8) [4]u8 {
+    var byte_out = [4]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
+    for (str, 0..) |byte, i| {
+        byte_out[i] = byte;
+    }
+
+    return byte_out;
 }
 
 pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
@@ -302,4 +518,69 @@ pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
         bytesToU32("\x1b\x5b\x43\xff") => .ArrowRight,
         else => .A,
     };
+}
+
+test "InputEvent" {
+    const inputEventKeyA = InputEvent.init(&u32ToBytes("\x41\xff\xff\xff"));
+    assert(inputEventKeyA.key.char == .A);
+    assert(inputEventKeyA.ctrl == false);
+    assert(inputEventKeyA.alt == false);
+    assert(inputEventKeyA.shift == true);
+    assert(std.mem.eql(u8, inputEventKeyA.raw, "\x41"));
+
+    const inputEventKeya = InputEvent.init(&u32ToBytes("\x61\xff\xff\xff"));
+    assert(inputEventKeya.key.char == .A);
+    assert(inputEventKeya.ctrl == false);
+    assert(inputEventKeya.alt == false);
+    assert(inputEventKeya.shift == false);
+    assert(std.mem.eql(u8, inputEventKeya.raw, "\x61"));
+
+    const inputEventKeyZ = InputEvent.init(&u32ToBytes("\x5a\xff\xff\xff"));
+    assert(inputEventKeyZ.key.char == .Z);
+    assert(inputEventKeyZ.ctrl == false);
+    assert(inputEventKeyZ.alt == false);
+    assert(inputEventKeyZ.shift == true);
+    assert(std.mem.eql(u8, inputEventKeyZ.raw, "\x5a"));
+
+    const inputEventEof = InputEvent.init(&u32ToBytes("\x04\xff\xff\xff"));
+    assert(inputEventEof.key.char == .D);
+    assert(inputEventEof.ctrl == true);
+    assert(inputEventEof.alt == false);
+    assert(inputEventEof.shift == false);
+
+    const inputEventEscape = InputEvent.init(&u32ToBytes("\x1b\xff\xff\xff"));
+    assert(inputEventEscape.key.char == .Escape);
+    assert(inputEventEscape.ctrl == true);
+    assert(inputEventEscape.alt == false);
+    assert(inputEventEscape.shift == false);
+
+    const inputEventEscapeShort = InputEvent.init(&u32ToBytes("\x1b"));
+    assert(inputEventEscapeShort.key.char == .Escape);
+    assert(std.mem.eql(u8, inputEventEscapeShort.raw, "\x1b"));
+
+    const inputEventKey0Short = InputEvent.init(&u32ToBytes("\x30"));
+    assert(inputEventKey0Short.key.char == .Key0);
+    assert(std.mem.eql(u8, inputEventKey0Short.raw, "\x30"));
+
+    const inputEventKey9Short = InputEvent.init(&u32ToBytes("\x39"));
+    assert(inputEventKey9Short.key.char == .Key9);
+    assert(std.mem.eql(u8, inputEventKey9Short.raw, "\x39"));
+
+    const inputEventSpace = InputEvent.init(&u32ToBytes("\x20\xff\xff\xff"));
+    assert(inputEventSpace.key.char == .Space);
+    assert(std.mem.eql(u8, inputEventSpace.raw, "\x20"));
+
+    const inputEventBackspaceShort = InputEvent.init(&u32ToBytes("\x7f"));
+    assert(inputEventBackspaceShort.key.char == .Backspace);
+    assert(std.mem.eql(u8, inputEventBackspaceShort.raw, "\x7f"));
+
+    const inputEventMetaN = InputEvent.init(&u32ToBytes("\x1b\x6e\xff\xff"));
+    assert(inputEventMetaN.ctrl == false);
+    assert(inputEventMetaN.alt == true);
+
+    const inputEventArrowUp = InputEvent.init(&u32ToBytes("\x1b\x5b\x41\xff"));
+    assert(inputEventArrowUp.ctrl == false);
+    assert(inputEventArrowUp.alt == false);
+    assert(inputEventArrowUp.key.functional == .ArrowUp);
+    assert(std.mem.eql(u8, inputEventArrowUp.raw, "\x1b\x5b\x41"));
 }
