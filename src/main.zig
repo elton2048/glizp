@@ -8,6 +8,9 @@ const keymap = @import("keymap_macos.zig");
 const constants = @import("constants.zig");
 const u8_MAX = constants.u8_MAX;
 
+const token_reader = @import("reader.zig");
+const printer = @import("printer.zig");
+
 const ArrayList = std.ArrayList;
 
 // TODO: Provide check for termios based on OS
@@ -41,6 +44,22 @@ fn read(reader: std.fs.File.Reader) [INPUT_BYTE_SIZE]u8 {
     };
 
     return buffer;
+}
+
+/// Parsing the statament into AST using PCRE/JSON encoder/decoder.
+/// Can this potentially use tree-sitter?
+fn parsing_statement(statement: []const u8) void {
+    var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    const general_allocator = gpa_allocator.allocator();
+
+    // TODO: Potential cache for statement -> Reader
+    const read_result = token_reader.Reader.init(general_allocator, statement);
+
+    const str = printer.pr_str(read_result.ast_root);
+
+    logz.info()
+        .fmt("[LOG]", "print: {any}", .{str})
+        .log();
 }
 
 /// Parsing function, which could be a part of Parser later
@@ -273,7 +292,7 @@ pub const Shell = struct {
 
                             try backspace(stdout, &arrayList);
                         } else if (inputEvent.ctrl and key == .J) {
-                            const input_result = try arrayList.toOwnedSlice();
+                            const statement = try arrayList.toOwnedSlice();
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
@@ -282,11 +301,13 @@ pub const Shell = struct {
                             try backspace(stdout, &arrayList);
                             reading = false;
 
-                            if (input_result.len == 0) {
+                            if (statement.len == 0) {
                                 continue;
                             }
 
-                            try self.*.history.append(input_result);
+                            parsing_statement(statement);
+
+                            try self.*.history.append(statement);
                             // Reset history
                             self.*.history_curr = self.*.history.items.len - 1;
 
@@ -327,6 +348,9 @@ pub const Shell = struct {
                                 }
                             }
                         } else {
+                            if (inputEvent.ctrl) {
+                                continue;
+                            }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
                                 try appendByte(stdout, &arrayList, byte);
@@ -389,3 +413,11 @@ pub const Shell = struct {
         }
     }
 };
+
+test {
+    var leaking_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const leaking_allocator = leaking_gpa.allocator();
+    try logz.setup(leaking_allocator, .{ .pool_size = 5, .level = .None });
+
+    std.testing.refAllDecls(@This());
+}
