@@ -7,6 +7,10 @@
             .url = "https://github.com/karlseguin/log.zig/archive/97d0818270a357d3ce7bc878abc32dc996fe78ff.tar.gz",
             .hash = "1220c032d828e768348b321a79523812be1c4cb27e1eb7ff5df54b573fa131afd448",
         },
+        .regex = .{
+            .url = "../zig-regex",
+            .hash = "1220b0c913700f12e0691d4fcf9773df8568e1a2e0b3a861282d9987bf2c834480f2",
+        },
     },
     .paths = .{
         "",

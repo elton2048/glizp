@@ -57,6 +57,7 @@ pub const CharKey = enum(u8) {
     // TODO: How to handle characters with shift? Should they be mapped
     // into explicit character?
     Space = 0x20,
+    DoubleQuote = 0x22,
 
     Quote = 0x27,
     BracketLeft = 0x28,
@@ -104,6 +105,8 @@ pub const KeyCode = enum {
     BackSlash,
     Backspace,
     BackTick,
+    BracketLeft,
+    BracketRight,
     BracketSquareLeft,
     BracketSquareRight,
     CapsLock,
@@ -171,6 +174,7 @@ pub const KeyCode = enum {
     Spacebar,
     Tab,
     Quote,
+    DoubleQuote,
     WindowsLeft,
     WindowsRight,
 
@@ -434,6 +438,11 @@ pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
         bytesToU32("\x1b\xff\xff\xff") => .Escape,
         bytesToU32("\x20\xff\xff\xff") => .Spacebar,
         // TODO: x21 - x2f
+        bytesToU32("\x22\xff\xff\xff") => .DoubleQuote,
+        bytesToU32("\x27\xff\xff\xff") => .Quote,
+        bytesToU32("\x28\xff\xff\xff") => .BracketLeft,
+        bytesToU32("\x29\xff\xff\xff") => .BracketRight,
+
         bytesToU32("\x30\xff\xff\xff") => .Key0,
         bytesToU32("\x31\xff\xff\xff") => .Key1,
         bytesToU32("\x32\xff\xff\xff") => .Key2,
