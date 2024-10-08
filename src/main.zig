@@ -112,7 +112,7 @@ fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.InputEvent {
 // backspace function aligns both stdout and array list to store byte.
 // wrapped corresponding params into struct later.
 // TODO: For multiple bytes case it is incorrect now, like emoji input.
-fn backspace(stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
+fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8)) !void {
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout_writer = bw.writer();
@@ -124,24 +124,16 @@ fn backspace(stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
     try bw.flush();
 
     // Erase the previous byte
-    _ = arrayList.*.pop();
-}
-
-// wrapped corresponding params into struct later.
-fn append(stdout: std.fs.File, arrayList: *ArrayList(u8), bytes: []const u8) !void {
-    const stdout_file = stdout.writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout_writer = bw.writer();
-
-    _ = try stdout_writer.write(bytes);
-    try bw.flush();
-    _ = try arrayList.*.writer().write(bytes);
-}
-
-// wrapped corresponding params into struct later.
-fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8) !void {
     if (optional_arrayList) |arrayList| {
-        try arrayList.append(byte);
+        _ = arrayList.*.pop();
+    }
+}
+
+// wrapped corresponding params into struct later.
+fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: ?usize) !void {
+    if (optional_arrayList) |arrayList| {
+        const index = pos orelse arrayList.items.len - 1;
+        try arrayList.insert(index, byte);
     }
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
@@ -150,16 +142,31 @@ fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8
     var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = temp_allocator.allocator();
 
-    const steps = optional_arrayList.?.items.len - 1;
-    if (steps > 0) {
-        const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
-        defer allocator.free(move);
+    if (optional_arrayList) |arrayList| {
+        const index = pos orelse arrayList.items.len - 1;
+        if (index > 0) {
+            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{index}) catch unreachable;
+            defer allocator.free(move);
 
-        try stdout_writer.writeAll(move);
-        // Clear the line
-        try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
+            try stdout_writer.writeAll(move);
+            // Clear the line
+            try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
+        }
+        try stdout_writer.writeAll(arrayList.items);
+
+        // Adjust the cursor if necessary
+        if (pos) |_pos| {
+            const steps = arrayList.items.len - _pos - 1;
+            if (steps > 0) {
+                const adjust_move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+                defer allocator.free(adjust_move);
+
+                try stdout_writer.writeAll(adjust_move);
+            }
+        }
+    } else {
+        try stdout_writer.writeByte(byte);
     }
-    try stdout_writer.writeAll(optional_arrayList.?.items);
     try bw.flush();
 }
 
@@ -183,6 +190,9 @@ pub const Shell = struct {
 
     history: ArrayList([]u8),
     history_curr: usize,
+    // Denotes where the cursor is to perform append and delete action
+    // from that point.
+    buffer_cursor: usize,
 
     // As (logz) logger is not thread-safe, using a pool for the use
     // of the logger.
@@ -213,6 +223,36 @@ pub const Shell = struct {
         const stdin_fd = self.*.stdin_fd;
         const orig_termios = self.*.orig_termios;
         try posix.tcsetattr(stdin_fd.*, .NOW, orig_termios);
+    }
+
+    fn moveLeft(self: *Shell, stdout: std.fs.File) !void {
+        if (self.buffer_cursor > 0) {
+            const stdout_file = stdout.writer();
+            var bw = std.io.bufferedWriter(stdout_file);
+            const stdout_writer = bw.writer();
+
+            const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_LEFT, .{1});
+            try stdout_writer.writeAll(move);
+
+            try bw.flush();
+
+            self.buffer_cursor -= 1;
+        }
+    }
+
+    fn moveRight(self: *Shell, stdout: std.fs.File, arrayList: ArrayList(u8)) !void {
+        if (self.buffer_cursor < arrayList.items.len) {
+            const stdout_file = stdout.writer();
+            var bw = std.io.bufferedWriter(stdout_file);
+            const stdout_writer = bw.writer();
+
+            const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{1});
+            try stdout_writer.writeAll(move);
+
+            try bw.flush();
+
+            self.buffer_cursor += 1;
+        }
     }
 
     pub fn init(allocator: std.mem.Allocator) *Shell {
@@ -250,6 +290,7 @@ pub const Shell = struct {
             .history = historyArrayList,
             .history_curr = 0,
             .logger = logger,
+            .buffer_cursor = 0,
         };
 
         try self.enableRawMode();
@@ -317,14 +358,17 @@ pub const Shell = struct {
                             }
 
                             try backspace(stdout, &arrayList);
+                            if (self.buffer_cursor > 0) {
+                                self.buffer_cursor -= 1;
+                            }
                         } else if (inputEvent.ctrl and key == .J) {
                             const statement = try arrayList.toOwnedSlice();
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
-                            try appendByte(stdout, &arrayList, '\n');
-                            try backspace(stdout, &arrayList);
+                            try appendByte(stdout, null, '\n', null);
+                            try backspace(stdout, null);
                             reading = false;
 
                             if (statement.len == 0) {
@@ -336,6 +380,8 @@ pub const Shell = struct {
                             try self.*.history.append(statement);
                             // Reset history
                             self.*.history_curr = self.*.history.items.len - 1;
+                            // Reset cursor
+                            self.buffer_cursor = 0;
 
                             continue;
                         } else if (inputEvent.alt) {
@@ -361,9 +407,11 @@ pub const Shell = struct {
                                     }
                                 }
 
+                                self.buffer_cursor = 0;
                                 const result = self.*.getHistoryItem(self.*.history_curr);
                                 for (result) |byte| {
-                                    try appendByte(stdout, &arrayList, byte);
+                                    try appendByte(stdout, &arrayList, byte, self.buffer_cursor);
+                                    self.buffer_cursor += 1;
                                 }
 
                                 // Set to the previous one
@@ -379,15 +427,28 @@ pub const Shell = struct {
                             }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                try appendByte(stdout, &arrayList, byte);
+                                try appendByte(stdout, &arrayList, byte, self.buffer_cursor);
+                                self.buffer_cursor += 1;
                             }
                         }
                     },
-                    .functional => continue,
+                    .functional => |key| {
+                        // NOTE: Restrict for left and right only. No function
+                        // yet on buffer.
+                        if (key == .ArrowLeft) {
+                            try self.moveLeft(stdout);
+                        } else if (key == .ArrowRight) {
+                            try self.moveRight(stdout, arrayList);
+                        }
+                    },
                 }
             } else |err| switch (err) {
                 else => |e| return e,
             }
+
+            logz.debug()
+                .fmt("[CURSOR]", "length: {d}", .{self.buffer_cursor})
+                .log();
         }
 
         return arrayList.toOwnedSlice();
