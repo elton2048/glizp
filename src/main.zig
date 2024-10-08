@@ -30,6 +30,20 @@ const ByteParsingError = error{
     EndOfStream,
 };
 
+/// Terminal escape control statement
+/// These shall be abstracted into Terminal layer later, see #12
+
+// Move cursor up by {d} lines
+const TERM_MOVE_CURSOR_UP = "\x1b[{d}A";
+// Move cursor down by {d} lines
+const TERM_MOVE_CURSOR_DOWN = "\x1b[{d}B";
+// Move cursor right by {d} columns
+const TERM_MOVE_CURSOR_RIGHT = "\x1b[{d}C";
+// Move cursor left by {d} columns
+const TERM_MOVE_CURSOR_LEFT = "\x1b[{d}D";
+
+const TERM_ERASE_FROM_CURSOR = "\x1b[0K";
+
 // Currently for macOS. Can this cater for other OS?
 // NOTE: How many bytes to represent an input makes sense?
 // Assume key input are in four bytes now.
@@ -126,15 +140,27 @@ fn append(stdout: std.fs.File, arrayList: *ArrayList(u8), bytes: []const u8) !vo
 
 // wrapped corresponding params into struct later.
 fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8) !void {
+    if (optional_arrayList) |arrayList| {
+        try arrayList.append(byte);
+    }
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout_writer = bw.writer();
 
-    try stdout_writer.writeByte(byte);
-    try bw.flush();
-    if (optional_arrayList) |arrayList| {
-        try arrayList.*.writer().writeByte(byte);
+    var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = temp_allocator.allocator();
+
+    const steps = optional_arrayList.?.items.len - 1;
+    if (steps > 0) {
+        const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+        defer allocator.free(move);
+
+        try stdout_writer.writeAll(move);
+        // Clear the line
+        try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
     }
+    try stdout_writer.writeAll(optional_arrayList.?.items);
+    try bw.flush();
 }
 
 pub fn main() !void {
