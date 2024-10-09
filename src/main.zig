@@ -42,9 +42,19 @@ const TERM_MOVE_CURSOR_RIGHT = "\x1b[{d}C";
 // Move cursor left by {d} columns
 const TERM_MOVE_CURSOR_LEFT = "\x1b[{d}D";
 
+// Command to move cursor in terminal in general
+const TERM_MOVE_CURSOR = "\x1b[{d}{c}";
+
 const TERM_ERASE_FROM_CURSOR = "\x1b[0K";
 
 const TERM_REQ_CURSOR_POS = "\x1b[6n";
+
+pub const Direction = enum(u8) {
+    Up = 'A',
+    Down = 'B',
+    Right = 'C',
+    Left = 'D',
+};
 
 pub const Position = struct {
     x: usize,
@@ -242,16 +252,24 @@ pub const Shell = struct {
         try posix.tcsetattr(stdin_fd.*, .NOW, orig_termios);
     }
 
+    /// TODO: Related to terminal part, shall be extracted to be in Terminal
+    /// struct later, see #12
+    fn term_move(self: *Shell, stdout: std.fs.File, steps: usize, direction: Direction) !void {
+        const stdout_file = stdout.writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout_writer = bw.writer();
+
+        const statement = std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR, .{ steps, @intFromEnum(direction) }) catch unreachable;
+        defer self.allocator.free(statement);
+
+        try stdout_writer.writeAll(statement);
+
+        try bw.flush();
+    }
+
     fn moveLeft(self: *Shell, stdout: std.fs.File) !void {
         if (self.buffer_cursor > 0) {
-            const stdout_file = stdout.writer();
-            var bw = std.io.bufferedWriter(stdout_file);
-            const stdout_writer = bw.writer();
-
-            const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_LEFT, .{1});
-            try stdout_writer.writeAll(move);
-
-            try bw.flush();
+            try self.term_move(stdout, 1, .Left);
 
             self.buffer_cursor -= 1;
 
@@ -260,27 +278,17 @@ pub const Shell = struct {
         }
     }
 
-    fn moveRight(self: *Shell, stdout: std.fs.File, arrayList: ArrayList(u8)) !void {
-        if (self.buffer_cursor < arrayList.items.len) {
-            const stdout_file = stdout.writer();
-            var bw = std.io.bufferedWriter(stdout_file);
-            const stdout_writer = bw.writer();
-
+    fn moveRight(self: *Shell, stdout: std.fs.File, buffer: ArrayList(u8)) !void {
+        if (self.buffer_cursor < buffer.items.len) {
             const prevCursor = try self.readCursorPos(stdout);
 
             if (prevCursor.x == self.config.window_size.x) {
                 // Handle the case when cursor is at the end of window
-                const m1 = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_LEFT, .{prevCursor.x - 1});
-                const m2 = std.fmt.comptimePrint(TERM_MOVE_CURSOR_DOWN, .{1});
-
-                try stdout_writer.writeAll(m1);
-                try stdout_writer.writeAll(m2);
+                try self.term_move(stdout, prevCursor.x - 1, .Left);
+                try self.term_move(stdout, 1, .Down);
             } else {
-                const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{1});
-                try stdout_writer.writeAll(move);
+                try self.term_move(stdout, 1, .Right);
             }
-
-            try bw.flush();
 
             self.buffer_cursor += 1;
 
@@ -297,27 +305,13 @@ pub const Shell = struct {
         // NOTE: Should we update the cursor here?
         self.config.cursor = originalPosition;
 
-        const stdout_file = stdout.writer();
-        var bw = std.io.bufferedWriter(stdout_file);
-        const stdout_writer = bw.writer();
-
-        const move_right = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{999});
-        try stdout_writer.writeAll(move_right);
-
-        const move_down = std.fmt.comptimePrint(TERM_MOVE_CURSOR_DOWN, .{999});
-        try stdout_writer.writeAll(move_down);
-
-        try bw.flush();
+        try self.term_move(stdout, 999, .Right);
+        try self.term_move(stdout, 999, .Down);
 
         const windowSize = try self.readCursorPos(stdout);
 
-        const move_left = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_LEFT, .{windowSize.x - originalPosition.x});
-        try stdout_writer.writeAll(move_left);
-
-        const move_up = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_UP, .{windowSize.y - originalPosition.y});
-        try stdout_writer.writeAll(move_up);
-
-        try bw.flush();
+        try self.term_move(stdout, windowSize.x - originalPosition.x, .Left);
+        try self.term_move(stdout, windowSize.y - originalPosition.y, .Up);
 
         return windowSize;
     }
