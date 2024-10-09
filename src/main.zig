@@ -44,6 +44,13 @@ const TERM_MOVE_CURSOR_LEFT = "\x1b[{d}D";
 
 const TERM_ERASE_FROM_CURSOR = "\x1b[0K";
 
+const TERM_REQ_CURSOR_POS = "\x1b[6n";
+
+pub const Position = struct {
+    x: usize,
+    y: usize,
+};
+
 // Currently for macOS. Can this cater for other OS?
 // NOTE: How many bytes to represent an input makes sense?
 // Assume key input are in four bytes now.
@@ -183,6 +190,7 @@ pub fn main() !void {
 }
 
 pub const Shell = struct {
+    allocator: std.mem.Allocator,
     stdin: std.fs.File,
     stdin_fd: *const posix.fd_t,
     orig_termios: posix.termios,
@@ -194,6 +202,9 @@ pub const Shell = struct {
     // from that point.
     buffer_cursor: usize,
 
+    // Config info about the shell
+    config: *ShellConfig,
+
     // As (logz) logger is not thread-safe, using a pool for the use
     // of the logger.
     // It is the same as calling the pool
@@ -202,6 +213,12 @@ pub const Shell = struct {
     // TODO: Using a generic logger to decouple with logz if needed,
     // for example supporting log/metrics through network service?
     logger: *logz.Pool,
+
+    const ShellConfig = struct {
+        set: bool,
+        cursor: Position,
+        window_size: Position,
+    };
 
     // FIXME: enableRawMode could only be run within init now as it will
     // keeps the I/O busy s.t. the shell is struck.
@@ -255,6 +272,64 @@ pub const Shell = struct {
         }
     }
 
+    /// Get the current window size.
+    /// In later stage when resize action is detected it should also be
+    /// called to refresh the information back to the Shell.
+    fn getWindowSize(self: *Shell, stdout: std.fs.File) !Position {
+        const originalPosition = try self.readCursorPos(stdout);
+        // NOTE: Should we update the cursor here?
+        self.config.cursor = originalPosition;
+
+        const stdout_file = stdout.writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout_writer = bw.writer();
+
+        const move_right = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{999});
+        try stdout_writer.writeAll(move_right);
+
+        const move_down = std.fmt.comptimePrint(TERM_MOVE_CURSOR_DOWN, .{999});
+        try stdout_writer.writeAll(move_down);
+
+        try bw.flush();
+
+        const windowSize = try self.readCursorPos(stdout);
+
+        const move_left = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_LEFT, .{windowSize.x - originalPosition.x});
+        try stdout_writer.writeAll(move_left);
+
+        const move_up = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_UP, .{windowSize.y - originalPosition.y});
+        try stdout_writer.writeAll(move_up);
+
+        try bw.flush();
+
+        return windowSize;
+    }
+
+    fn readCursorPos(self: *Shell, stdout: std.fs.File) !Position {
+        const reader = self.*.stdin.reader();
+
+        const stdout_file = stdout.writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout_writer = bw.writer();
+
+        try stdout_writer.writeAll(TERM_REQ_CURSOR_POS);
+
+        try bw.flush();
+
+        // Reference for delimiter: https://vt100.net/docs/vt100-ug/chapter3.html#CPR
+        _ = try reader.readBytesNoEof(2);
+        const row_str = reader.readUntilDelimiterAlloc(self.allocator, 59, 8) catch unreachable;
+        const column_str = reader.readUntilDelimiterAlloc(self.allocator, 'R', 8) catch unreachable;
+
+        const row = utils.parseU64(row_str, 10) catch @panic("Unexpected non number value");
+        const column = utils.parseU64(column_str, 10) catch @panic("Unexpected non number value");
+
+        return Position{
+            .x = column,
+            .y = row,
+        };
+    }
+
     pub fn init(allocator: std.mem.Allocator) *Shell {
         // NOTE: Currently the logger cannot be configured to log in
         // multiple outputs (like stdout then file)
@@ -281,8 +356,22 @@ pub const Shell = struct {
         //     historyArrayList.deinit();
         // }
 
+        const config = allocator.create(ShellConfig) catch @panic("OOM");
+        config.* = ShellConfig{
+            .set = false,
+            .cursor = Position{
+                .x = 0,
+                .y = 0,
+            },
+            .window_size = Position{
+                .x = 0,
+                .y = 0,
+            },
+        };
+
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
+            .allocator = allocator,
             .stdin = stdin,
             .stdin_fd = &stdin_fd,
             .orig_termios = orig_termios,
@@ -291,13 +380,39 @@ pub const Shell = struct {
             .history_curr = 0,
             .logger = logger,
             .buffer_cursor = 0,
+            .config = config,
         };
 
         try self.enableRawMode();
+
+        self.initConfig();
+
+        self.logConfig();
+
         return self;
     }
 
+    // Log config info
+    fn logConfig(self: *Shell) void {
+        self.logger.logger()
+            .fmt("[LOG]", "Config info: {any}", .{self.config})
+            .level(.Debug)
+            .log();
+    }
+
+    fn initConfig(self: *Shell) void {
+        if (self.config.set) {
+            @panic("Initial config is set already. Unexpect to set again.");
+        }
+        self.config.set = true;
+
+        const stdout = std.io.getStdOut();
+        const windowSize = self.getWindowSize(stdout) catch unreachable;
+        self.config.window_size = windowSize;
+    }
+
     fn deinit(self: *Shell) void {
+        self.allocator.destroy(self.config);
         self.*.disableRawMode() catch @panic("deinit failed");
     }
 
