@@ -254,6 +254,9 @@ pub const Shell = struct {
             try bw.flush();
 
             self.buffer_cursor -= 1;
+
+            const cursor = try self.readCursorPos(stdout);
+            self.config.cursor = cursor;
         }
     }
 
@@ -263,12 +266,26 @@ pub const Shell = struct {
             var bw = std.io.bufferedWriter(stdout_file);
             const stdout_writer = bw.writer();
 
-            const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{1});
-            try stdout_writer.writeAll(move);
+            const prevCursor = try self.readCursorPos(stdout);
+
+            if (prevCursor.x == self.config.window_size.x) {
+                // Handle the case when cursor is at the end of window
+                const m1 = try std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR_LEFT, .{prevCursor.x - 1});
+                const m2 = std.fmt.comptimePrint(TERM_MOVE_CURSOR_DOWN, .{1});
+
+                try stdout_writer.writeAll(m1);
+                try stdout_writer.writeAll(m2);
+            } else {
+                const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_RIGHT, .{1});
+                try stdout_writer.writeAll(move);
+            }
 
             try bw.flush();
 
             self.buffer_cursor += 1;
+
+            const cursor = try self.readCursorPos(stdout);
+            self.config.cursor = cursor;
         }
     }
 
