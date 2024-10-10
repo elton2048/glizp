@@ -129,7 +129,14 @@ fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.InputEvent {
 // backspace function aligns both stdout and array list to store byte.
 // wrapped corresponding params into struct later.
 // TODO: For multiple bytes case it is incorrect now, like emoji input.
-fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8)) !void {
+fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), pos: usize) !void {
+    const charIndex = pos - 1;
+
+    // Erase the previous byte
+    if (optional_arrayList) |arrayList| {
+        _ = arrayList.*.orderedRemove(charIndex);
+    }
+
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout_writer = bw.writer();
@@ -138,12 +145,22 @@ fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8)) !void {
     try stdout_writer.writeByte('\u{0020}');
     try stdout_writer.writeByte('\u{0008}');
 
-    try bw.flush();
-
-    // Erase the previous byte
     if (optional_arrayList) |arrayList| {
-        _ = arrayList.*.pop();
+        // Adjustment for the string after cursor
+        const steps = arrayList.items.len - charIndex;
+        if (steps > 0) {
+            try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
+            try stdout_writer.writeAll(arrayList.items[charIndex..]);
+
+            // TODO: For simplicity not using allocator here, the cost is O(n) now.
+            for (steps) |_| {
+                const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_LEFT, .{1});
+                try stdout_writer.writeAll(move);
+            }
+        }
     }
+
+    try bw.flush();
 }
 
 // wrapped corresponding params into struct later.
@@ -483,7 +500,7 @@ pub const Shell = struct {
                                 continue;
                             }
 
-                            try backspace(stdout, &arrayList);
+                            try backspace(stdout, &arrayList, self.buffer_cursor);
                             if (self.buffer_cursor > 0) {
                                 self.buffer_cursor -= 1;
                             }
@@ -494,7 +511,7 @@ pub const Shell = struct {
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
                             try appendByte(stdout, null, '\n', null);
-                            try backspace(stdout, null);
+                            try backspace(stdout, null, self.buffer_cursor);
                             reading = false;
 
                             if (statement.len == 0) {
@@ -584,10 +601,12 @@ pub const Shell = struct {
         return self.history.items[index];
     }
 
-    fn clearLine(self: Shell, stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
-        _ = self;
+    fn clearLine(self: *Shell, stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
+        // TODO: Provide efficient way for this one
         for (0..arrayList.items.len) |_| {
-            try backspace(stdout, arrayList);
+            try backspace(stdout, arrayList, self.buffer_cursor);
+
+            self.buffer_cursor -= 1;
         }
     }
 
