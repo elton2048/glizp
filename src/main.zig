@@ -49,6 +49,8 @@ const TERM_ERASE_FROM_CURSOR = "\x1b[0K";
 
 const TERM_REQ_CURSOR_POS = "\x1b[6n";
 
+const TERM_MAX_STEPS: usize = 999;
+
 pub const Direction = enum(u8) {
     Up = 'A',
     Down = 'B',
@@ -140,23 +142,26 @@ fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), pos: usiz
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout_writer = bw.writer();
+
     // terminal display; assume to be in raw mode
     try stdout_writer.writeByte('\u{0008}');
     try stdout_writer.writeByte('\u{0020}');
     try stdout_writer.writeByte('\u{0008}');
 
     if (optional_arrayList) |arrayList| {
+        var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = temp_allocator.allocator();
+
         // Adjustment for the string after cursor
         const steps = arrayList.items.len - charIndex;
         if (steps > 0) {
             try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
             try stdout_writer.writeAll(arrayList.items[charIndex..]);
 
-            // TODO: For simplicity not using allocator here, the cost is O(n) now.
-            for (steps) |_| {
-                const move = std.fmt.comptimePrint(TERM_MOVE_CURSOR_LEFT, .{1});
-                try stdout_writer.writeAll(move);
-            }
+            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+            defer allocator.free(move);
+
+            try stdout_writer.writeAll(move);
         }
     }
 
@@ -164,22 +169,20 @@ fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), pos: usiz
 }
 
 // wrapped corresponding params into struct later.
-fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: ?usize) !void {
+fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: usize) !void {
     if (optional_arrayList) |arrayList| {
-        const index = pos orelse arrayList.items.len - 1;
-        try arrayList.insert(index, byte);
+        try arrayList.insert(pos, byte);
     }
     const stdout_file = stdout.writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout_writer = bw.writer();
 
-    var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = temp_allocator.allocator();
-
     if (optional_arrayList) |arrayList| {
-        const index = pos orelse arrayList.items.len - 1;
-        if (index > 0) {
-            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{index}) catch unreachable;
+        var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = temp_allocator.allocator();
+
+        if (pos > 0) {
+            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{pos}) catch unreachable;
             defer allocator.free(move);
 
             try stdout_writer.writeAll(move);
@@ -189,14 +192,12 @@ fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8
         try stdout_writer.writeAll(arrayList.items);
 
         // Adjust the cursor if necessary
-        if (pos) |_pos| {
-            const steps = arrayList.items.len - _pos - 1;
-            if (steps > 0) {
-                const adjust_move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
-                defer allocator.free(adjust_move);
+        const steps = arrayList.items.len - pos - 1;
+        if (steps > 0) {
+            const adjust_move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+            defer allocator.free(adjust_move);
 
-                try stdout_writer.writeAll(adjust_move);
-            }
+            try stdout_writer.writeAll(adjust_move);
         }
     } else {
         try stdout_writer.writeByte(byte);
@@ -225,9 +226,11 @@ pub const Shell = struct {
 
     history: ArrayList([]u8),
     history_curr: usize,
-    // Denotes where the cursor is to perform append and delete action
-    // from that point.
-    buffer_cursor: usize,
+    // Denotes where the buffer cursor position is at to perform append
+    // and delete action from that point.
+    buffer_pos: usize,
+    // Denotes the buffer cursor.
+    buffer_cursor: Position,
 
     // Config info about the shell
     config: *ShellConfig,
@@ -243,8 +246,7 @@ pub const Shell = struct {
 
     const ShellConfig = struct {
         set: bool,
-        cursor: Position,
-        window_size: Position,
+        frame_size: Position,
     };
 
     // FIXME: enableRawMode could only be run within init now as it will
@@ -285,52 +287,54 @@ pub const Shell = struct {
     }
 
     fn moveLeft(self: *Shell, stdout: std.fs.File) !void {
-        if (self.buffer_cursor > 0) {
+        if (self.buffer_pos > 0) {
             try self.term_move(stdout, 1, .Left);
 
-            self.buffer_cursor -= 1;
+            self.buffer_pos -= 1;
 
             const cursor = try self.readCursorPos(stdout);
-            self.config.cursor = cursor;
+            self.buffer_cursor = cursor;
         }
     }
 
     fn moveRight(self: *Shell, stdout: std.fs.File, buffer: ArrayList(u8)) !void {
-        if (self.buffer_cursor < buffer.items.len) {
+        if (self.buffer_pos < buffer.items.len) {
             const prevCursor = try self.readCursorPos(stdout);
 
-            if (prevCursor.x == self.config.window_size.x) {
-                // Handle the case when cursor is at the end of window
+            if (prevCursor.x == self.config.frame_size.x) {
+                // Handle the case when cursor is at the end of frame
                 try self.term_move(stdout, prevCursor.x - 1, .Left);
                 try self.term_move(stdout, 1, .Down);
             } else {
                 try self.term_move(stdout, 1, .Right);
             }
 
-            self.buffer_cursor += 1;
+            self.buffer_pos += 1;
 
             const cursor = try self.readCursorPos(stdout);
-            self.config.cursor = cursor;
+            self.buffer_cursor = cursor;
         }
     }
 
-    /// Get the current window size.
+    /// Get the current frame (window in modern term) size.
     /// In later stage when resize action is detected it should also be
     /// called to refresh the information back to the Shell.
-    fn getWindowSize(self: *Shell, stdout: std.fs.File) !Position {
+    fn getFrameSize(self: *Shell, stdout: std.fs.File) !Position {
         const originalPosition = try self.readCursorPos(stdout);
-        // NOTE: Should we update the cursor here?
-        self.config.cursor = originalPosition;
+        // NOTE: Shortcut for now.
+        // Probably not updating the buffer cursor here if there are multiple
+        // windows implemented.
+        self.buffer_cursor = originalPosition;
 
-        try self.term_move(stdout, 999, .Right);
-        try self.term_move(stdout, 999, .Down);
+        try self.term_move(stdout, TERM_MAX_STEPS, .Right);
+        try self.term_move(stdout, TERM_MAX_STEPS, .Down);
 
-        const windowSize = try self.readCursorPos(stdout);
+        const frameSize = try self.readCursorPos(stdout);
 
-        try self.term_move(stdout, windowSize.x - originalPosition.x, .Left);
-        try self.term_move(stdout, windowSize.y - originalPosition.y, .Up);
+        try self.term_move(stdout, frameSize.x - originalPosition.x, .Left);
+        try self.term_move(stdout, frameSize.y - originalPosition.y, .Up);
 
-        return windowSize;
+        return frameSize;
     }
 
     fn readCursorPos(self: *Shell, stdout: std.fs.File) !Position {
@@ -391,7 +395,7 @@ pub const Shell = struct {
                 .x = 0,
                 .y = 0,
             },
-            .window_size = Position{
+            .frame_size = Position{
                 .x = 0,
                 .y = 0,
             },
@@ -407,7 +411,7 @@ pub const Shell = struct {
             .history = historyArrayList,
             .history_curr = 0,
             .logger = logger,
-            .buffer_cursor = 0,
+            .buffer_pos = 0,
             .config = config,
         };
 
@@ -435,8 +439,8 @@ pub const Shell = struct {
         self.config.set = true;
 
         const stdout = std.io.getStdOut();
-        const windowSize = self.getWindowSize(stdout) catch unreachable;
-        self.config.window_size = windowSize;
+        const frameSize = self.getFrameSize(stdout) catch unreachable;
+        self.config.frame_size = frameSize;
     }
 
     fn deinit(self: *Shell) void {
@@ -500,9 +504,9 @@ pub const Shell = struct {
                                 continue;
                             }
 
-                            try backspace(stdout, &arrayList, self.buffer_cursor);
-                            if (self.buffer_cursor > 0) {
-                                self.buffer_cursor -= 1;
+                            try backspace(stdout, &arrayList, self.buffer_pos);
+                            if (self.buffer_pos > 0) {
+                                self.buffer_pos -= 1;
                             }
                         } else if (inputEvent.ctrl and key == .J) {
                             const statement = try arrayList.toOwnedSlice();
@@ -510,8 +514,8 @@ pub const Shell = struct {
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
-                            try appendByte(stdout, null, '\n', null);
-                            try backspace(stdout, null, self.buffer_cursor);
+                            try appendByte(stdout, null, '\n', self.buffer_pos);
+                            try backspace(stdout, null, self.buffer_pos);
                             reading = false;
 
                             if (statement.len == 0) {
@@ -524,7 +528,7 @@ pub const Shell = struct {
                             // Reset history
                             self.*.history_curr = self.*.history.items.len - 1;
                             // Reset cursor
-                            self.buffer_cursor = 0;
+                            self.buffer_pos = 0;
 
                             continue;
                         } else if (inputEvent.alt) {
@@ -550,11 +554,11 @@ pub const Shell = struct {
                                     }
                                 }
 
-                                self.buffer_cursor = 0;
+                                self.buffer_pos = 0;
                                 const result = self.*.getHistoryItem(self.*.history_curr);
                                 for (result) |byte| {
-                                    try appendByte(stdout, &arrayList, byte, self.buffer_cursor);
-                                    self.buffer_cursor += 1;
+                                    try appendByte(stdout, &arrayList, byte, self.buffer_pos);
+                                    self.buffer_pos += 1;
                                 }
 
                                 // Set to the previous one
@@ -570,8 +574,8 @@ pub const Shell = struct {
                             }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                try appendByte(stdout, &arrayList, byte, self.buffer_cursor);
-                                self.buffer_cursor += 1;
+                                try appendByte(stdout, &arrayList, byte, self.buffer_pos);
+                                self.buffer_pos += 1;
                             }
                         }
                     },
@@ -590,7 +594,7 @@ pub const Shell = struct {
             }
 
             logz.debug()
-                .fmt("[CURSOR]", "length: {d}", .{self.buffer_cursor})
+                .fmt("[CURSOR]", "length: {d}", .{self.buffer_pos})
                 .log();
         }
 
@@ -604,9 +608,9 @@ pub const Shell = struct {
     fn clearLine(self: *Shell, stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
         // TODO: Provide efficient way for this one
         for (0..arrayList.items.len) |_| {
-            try backspace(stdout, arrayList, self.buffer_cursor);
+            try backspace(stdout, arrayList, self.buffer_pos);
 
-            self.buffer_cursor -= 1;
+            self.buffer_pos -= 1;
         }
     }
 
