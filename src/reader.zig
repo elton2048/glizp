@@ -8,6 +8,8 @@ const ArrayList = std.ArrayList;
 const debug = std.debug;
 const mem = std.mem;
 
+const BOOLEAN_MAP = @import("semantic.zig").BOOLEAN_MAP;
+
 const Token = []const u8;
 
 const Error = error{
@@ -258,6 +260,8 @@ pub const Reader = struct {
                 break;
             }
         }
+        const isBoolean = BOOLEAN_MAP.get(token);
+
         var mal: MalType = undefined;
 
         // NOTE: Decide the return MalType based on different rules
@@ -267,6 +271,10 @@ pub const Reader = struct {
                 .number = .{
                     .value = utils.parseU64(token, 10) catch @panic("Unexpected overflow."),
                 },
+            };
+        } else if (isBoolean) |mal_bool| {
+            mal = MalType{
+                .boolean = mal_bool,
             };
         } else {
             mal = MalType{
@@ -290,10 +298,29 @@ test "Reader" {
         var r2 = Reader.init(allocator, "test");
         defer r2.deinit();
         debug.assert(r2.ast_root == .string);
+    }
 
-        // var r3 = Reader.init(allocator, "true");
-        // defer r3.deinit();
-        // debug.assert(r3.ast_root == .boolean);
+    // Boolean cases
+    {
+        var b1 = Reader.init(allocator, "t");
+        defer b1.deinit();
+        debug.assert(b1.ast_root == .boolean);
+        switch (b1.ast_root) {
+            .boolean => |root_boolean| {
+                debug.assert(root_boolean == true);
+            },
+            else => unreachable,
+        }
+
+        var b2 = Reader.init(allocator, "nil");
+        defer b2.deinit();
+        debug.assert(b2.ast_root == .boolean);
+        switch (b2.ast_root) {
+            .boolean => |root_boolean| {
+                debug.assert(root_boolean == false);
+            },
+            else => unreachable,
+        }
     }
 
     // Simple list cases

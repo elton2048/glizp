@@ -9,6 +9,11 @@ const mem = std.mem;
 
 const MalType = @import("reader.zig").MalType;
 
+const semantic = @import("semantic.zig");
+
+const BOOLEAN_TRUE = semantic.BOOLEAN_TRUE;
+const BOOLEAN_FALSE = semantic.BOOLEAN_FALSE;
+
 pub fn pr_str(mal: MalType) []u8 {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa_allocator.allocator();
@@ -17,7 +22,13 @@ pub fn pr_str(mal: MalType) []u8 {
     defer string.deinit();
 
     switch (mal) {
-        .boolean => {},
+        .boolean => |boolean| {
+            if (boolean) {
+                string.appendSlice(BOOLEAN_TRUE) catch @panic("allocator error");
+            } else {
+                string.appendSlice(BOOLEAN_FALSE) catch @panic("allocator error");
+            }
+        },
         .number => |value| {
             const result = std.fmt.allocPrint(allocator, "{d}", .{value.value}) catch @panic("allocator error");
             string.appendSlice(result) catch @panic("allocator error");
@@ -44,6 +55,19 @@ pub fn pr_str(mal: MalType) []u8 {
 
 test "printer" {
     const allocator = std.testing.allocator;
+
+    // Test for boolean case
+    {
+        const bool_true = MalType{ .boolean = true };
+
+        const bool_true_result = pr_str(bool_true);
+        debug.assert(mem.eql(u8, bool_true_result, "t"));
+
+        const bool_false = MalType{ .boolean = false };
+
+        const bool_false_result = pr_str(bool_false);
+        debug.assert(mem.eql(u8, bool_false_result, "nil"));
+    }
 
     // Test for string case
     {
