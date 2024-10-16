@@ -3,6 +3,9 @@ const regex = @import("regex");
 const logz = @import("logz");
 
 const utils = @import("utils.zig");
+const iterator = @import("iterator.zig");
+
+const StringIterator = iterator.StringIterator;
 
 const ArrayList = std.ArrayList;
 const debug = std.debug;
@@ -33,8 +36,12 @@ pub const Number = struct {
 pub const MalType = union(enum) {
     boolean: bool,
     number: Number,
-    string: []const u8,
+    /// An array which is ordered sequence of characters. The basic way
+    /// to create is by using double quotes.
+    string: ArrayList(u8),
     list: ArrayList(MalType),
+    /// General symbol type including function
+    symbol: []const u8,
 
     SExprEnd,
     /// Incompleted type from parser
@@ -42,6 +49,9 @@ pub const MalType = union(enum) {
 
     pub fn deinit(self: MalType) void {
         switch (self) {
+            .string => |string| {
+                string.deinit();
+            },
             .list => |list| {
                 for (list.items) |item| {
                     item.deinit();
@@ -57,7 +67,7 @@ pub const List = ArrayList(MalType);
 
 // NOTE: Currently the regex requires fix to allow repeater after pipe('|')
 // char. Check isByteClass method in the library.
-const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\.|[^\"])*\"?|;.*|[^\\s\\[\\]\\{\\}('\"`,;)]*)";
+const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\\\.|[^\\\\\"])*\"?|;.*|[^\\s\\[\\]\\{\\}('\"`,;)]*)";
 
 /// Reader object
 pub const Reader = struct {
@@ -251,14 +261,36 @@ pub const Reader = struct {
     }
 
     pub fn read_atom(self: *Reader, token: Token) MalType {
-        _ = self;
-        // TODO: keyword could be dynamic
+        var str_al = ArrayList(u8).init(self.allocator);
+
+        var iter = StringIterator.init(token);
+
         var isNumber = true;
-        for (token) |char| {
+        var isString = false;
+        while (iter.next()) |char| {
             if (!isDigit(char)) {
                 isNumber = false;
-                break;
             }
+            if (!isString and iter.index == 1 and char == '\"' and token[token.len - 1] == '\"') {
+                isString = true;
+            }
+
+            // Fallback to symbol immediately
+            if (!isString and !isNumber) break;
+
+            if (iter.index == 1 or iter.index == token.len) {
+                // Skip character denoting string
+                continue;
+            }
+            // Handle escape character cases
+            if (char == '\\') {
+                if (iter.peek() == '\"') {
+                    // Skip the escape character
+                    continue;
+                }
+            }
+
+            str_al.append(char) catch unreachable;
         }
         const isBoolean = BOOLEAN_MAP.get(token);
 
@@ -276,9 +308,13 @@ pub const Reader = struct {
             mal = MalType{
                 .boolean = mal_bool,
             };
+        } else if (isString) {
+            mal = MalType{
+                .string = str_al,
+            };
         } else {
             mal = MalType{
-                .string = token,
+                .symbol = token,
             };
         }
 
@@ -291,13 +327,9 @@ test "Reader" {
 
     // Simple cases
     {
-        var r1 = Reader.init(allocator, "1");
-        defer r1.deinit();
-        debug.assert(r1.ast_root == .number);
-
-        var r2 = Reader.init(allocator, "test");
-        defer r2.deinit();
-        debug.assert(r2.ast_root == .string);
+        var sym1 = Reader.init(allocator, "test");
+        defer sym1.deinit();
+        debug.assert(sym1.ast_root == .symbol);
     }
 
     // Boolean cases
@@ -323,6 +355,50 @@ test "Reader" {
         }
     }
 
+    // Number cases
+    {
+        var n1 = Reader.init(allocator, "1");
+        defer n1.deinit();
+        debug.assert(n1.ast_root == .number);
+    }
+
+    // String cases
+    {
+        var str1 = Reader.init(allocator, "\"test\"");
+        defer str1.deinit();
+        debug.assert(str1.ast_root == .string);
+        switch (str1.ast_root) {
+            .string => |root_string| {
+                debug.assert(mem.eql(u8, root_string.items, "test"));
+            },
+            else => unreachable,
+        }
+
+        // Read case: "te\"st"
+        // Stored result: te"st
+        var str2 = Reader.init(allocator, "\"te\\\"st\"");
+        defer str2.deinit();
+        debug.assert(str2.ast_root == .string);
+
+        switch (str2.ast_root) {
+            .string => |root_string| {
+                debug.assert(mem.eql(u8, root_string.items, "te\"st"));
+            },
+            else => unreachable,
+        }
+
+        var str3 = Reader.init(allocator, "\"te\\st\"");
+        defer str3.deinit();
+        debug.assert(str3.ast_root == .string);
+
+        switch (str3.ast_root) {
+            .string => |root_string| {
+                debug.assert(mem.eql(u8, root_string.items, "te\\st"));
+            },
+            else => unreachable,
+        }
+    }
+
     // Simple list cases
     {
         var l1 = Reader.init(allocator, "(\"test\")");
@@ -333,7 +409,7 @@ test "Reader" {
                 debug.assert(list.items[0] == .string);
                 switch (list.items[0]) {
                     .string => |str| {
-                        debug.assert(mem.eql(u8, str, "\"test\""));
+                        debug.assert(mem.eql(u8, str.items, "test"));
                     },
                     else => unreachable,
                 }
