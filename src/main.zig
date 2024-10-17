@@ -93,7 +93,7 @@ fn parsing_statement(statement: []const u8) void {
     // TODO: Potential cache for statement -> Reader
     const read_result = token_reader.Reader.init(general_allocator, statement);
 
-    const str = printer.pr_str(read_result.ast_root);
+    const str = printer.pr_str(read_result.ast_root, true);
 
     logz.info()
         .fmt("[LOG]", "print: {any}", .{str})

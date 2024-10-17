@@ -9,7 +9,16 @@ const mem = std.mem;
 
 const MalType = @import("reader.zig").MalType;
 
-pub fn pr_str(mal: MalType) []u8 {
+const semantic = @import("semantic.zig");
+
+const BOOLEAN_TRUE = semantic.BOOLEAN_TRUE;
+const BOOLEAN_FALSE = semantic.BOOLEAN_FALSE;
+
+const iterator = @import("iterator.zig");
+
+const StringIterator = iterator.StringIterator;
+
+pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa_allocator.allocator();
 
@@ -17,18 +26,37 @@ pub fn pr_str(mal: MalType) []u8 {
     defer string.deinit();
 
     switch (mal) {
-        .boolean => {},
+        .boolean => |boolean| {
+            if (boolean) {
+                string.appendSlice(BOOLEAN_TRUE) catch @panic("allocator error");
+            } else {
+                string.appendSlice(BOOLEAN_FALSE) catch @panic("allocator error");
+            }
+        },
         .number => |value| {
             const result = std.fmt.allocPrint(allocator, "{d}", .{value.value}) catch @panic("allocator error");
+            defer allocator.free(result);
             string.appendSlice(result) catch @panic("allocator error");
         },
         .string => |str| {
-            string.appendSlice(str) catch @panic("allocator error");
+            var iter = StringIterator.init(str.items);
+
+            string.appendSlice("\"") catch @panic("allocator error");
+            while (iter.next()) |char| {
+                // Handle escape character
+                if (print_readably) {
+                    if (char == '"' or char == '\\') {
+                        string.append('\\') catch @panic("allocator error");
+                    }
+                }
+                string.append(char) catch @panic("allocator error");
+            }
+            string.appendSlice("\"") catch @panic("allocator error");
         },
         .list => |list| {
             string.appendSlice("(") catch @panic("allocator error");
             for (list.items) |item| {
-                const result = pr_str(item);
+                const result = pr_str(item, print_readably);
                 string.appendSlice(result) catch @panic("allocator error");
                 string.appendSlice(" ") catch @panic("allocator error");
             }
@@ -42,28 +70,95 @@ pub fn pr_str(mal: MalType) []u8 {
     return string.toOwnedSlice() catch unreachable;
 }
 
+fn initStringArrayList(allocator: mem.Allocator, str: []const u8) ArrayList(u8) {
+    var al = ArrayList(u8).init(allocator);
+    al.appendSlice(str) catch unreachable;
+
+    return al;
+}
+
 test "printer" {
     const allocator = std.testing.allocator;
 
+    // Test for boolean case
+    {
+        const bool_true = MalType{ .boolean = true };
+
+        const bool_true_result = pr_str(bool_true, true);
+        debug.assert(mem.eql(u8, bool_true_result, "t"));
+
+        const bool_false = MalType{ .boolean = false };
+
+        const bool_false_result = pr_str(bool_false, true);
+        debug.assert(mem.eql(u8, bool_false_result, "nil"));
+    }
+
     // Test for string case
     {
-        const mal1 = MalType{ .string = "test" };
+        const str1_al = initStringArrayList(allocator, "test");
+        defer str1_al.deinit();
 
-        const mal1_result = pr_str(mal1);
-        debug.assert(mem.eql(u8, mal1_result, "test"));
+        const str1 = MalType{ .string = str1_al };
+
+        const str1_readably_result = pr_str(str1, true);
+        debug.assert(mem.eql(u8, str1_readably_result, "\"test\""));
+        const str1_non_readably_result = pr_str(str1, false);
+        debug.assert(mem.eql(u8, str1_non_readably_result, "\"test\""));
+
+        const str2_al = initStringArrayList(allocator, "te\"st");
+        defer str2_al.deinit();
+
+        const str2 = MalType{ .string = str2_al };
+
+        // stored value: "te"st"
+        // readably result: "te\"st" (escaped doublequote inside)
+        const str2_readably_result = pr_str(str2, true);
+        debug.assert(mem.eql(u8, str2_readably_result, "\"te\\\"st\""));
+        const str2_non_readably_result = pr_str(str2, false);
+        debug.assert(mem.eql(u8, str2_non_readably_result, "\"te\"st\""));
+
+        const str3_al = initStringArrayList(allocator, "\\");
+        defer str3_al.deinit();
+
+        const str3 = MalType{ .string = str3_al };
+
+        // stored value: "\"
+        // readably result: "\\" (escaped backslash inside)
+        const str3_readably_result = pr_str(str3, true);
+        debug.assert(mem.eql(u8, str3_readably_result, "\"\\\\\""));
+        const str3_non_readably_result = pr_str(str3, false);
+        debug.assert(mem.eql(u8, str3_non_readably_result, "\"\\\""));
+
+        const str4_al = initStringArrayList(allocator, "te\\\"st");
+        defer str4_al.deinit();
+
+        const str4 = MalType{ .string = str4_al };
+
+        // stored value: "te\"st"
+        // readably result: "te\\\"st" (escaped backslash and doublequote inside)
+        const str4_readably_result = pr_str(str4, true);
+        debug.assert(mem.eql(u8, str4_readably_result, "\"te\\\\\\\"st\""));
+        const str4_non_readably_result = pr_str(str4, false);
+        debug.assert(mem.eql(u8, str4_non_readably_result, "\"te\\\"st\""));
     }
 
     // Test for list case
     {
-        var list1 = ArrayList(MalType).init(allocator);
-        defer list1.deinit();
+        const str1_al = initStringArrayList(allocator, "1");
+        defer str1_al.deinit();
 
-        list1.append(MalType{ .string = "1" }) catch unreachable;
-        list1.append(MalType{ .string = "2" }) catch unreachable;
+        const str2_al = initStringArrayList(allocator, "2");
+        defer str2_al.deinit();
 
-        const mal2 = MalType{ .list = list1 };
-        const mal2_result = pr_str(mal2);
+        var list1_al = ArrayList(MalType).init(allocator);
+        defer list1_al.deinit();
 
-        debug.assert(mem.eql(u8, mal2_result, "(1 2)"));
+        list1_al.append(MalType{ .string = str1_al }) catch unreachable;
+        list1_al.append(MalType{ .string = str2_al }) catch unreachable;
+
+        const list1 = MalType{ .list = list1_al };
+        const list1_result = pr_str(list1, true);
+
+        debug.assert(mem.eql(u8, list1_result, "(\"1\" \"2\")"));
     }
 }

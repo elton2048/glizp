@@ -323,6 +323,7 @@ pub const InputEvent = struct {
         const exceptional_chars = [_]u8{
             @intFromEnum(CharKey.BracketSquareLeft),
             @intFromEnum(CharKey.BracketSquareRight),
+            @intFromEnum(CharKey.BackSlash),
             @intFromEnum(CharKey.Backspace),
         };
 
