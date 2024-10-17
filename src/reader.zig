@@ -15,7 +15,7 @@ const BOOLEAN_MAP = @import("semantic.zig").BOOLEAN_MAP;
 
 const Token = []const u8;
 
-const Error = error{
+const ReaderError = error{
     Overflow,
     EOF,
 
@@ -29,7 +29,13 @@ fn isDigit(char: u8) bool {
     return char >= '0' and char <= '9';
 }
 
+pub const MalTypeError = error{
+    Unhandled,
+    IllegalType,
+};
+
 pub const Number = struct {
+    // TODO: Support for floating point
     value: u64,
 };
 
@@ -59,6 +65,42 @@ pub const MalType = union(enum) {
                 list.deinit();
             },
             else => {},
+        }
+    }
+
+    pub fn as_boolean(self: MalType) MalTypeError!bool {
+        switch (self) {
+            .boolean => |boolean| {
+                return boolean;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_number(self: MalType) MalTypeError!Number {
+        switch (self) {
+            .number => |num| {
+                return num;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_string(self: MalType) MalTypeError!ArrayList(u8) {
+        switch (self) {
+            .string => |str| {
+                return str;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_list(self: MalType) MalTypeError!ArrayList(MalType) {
+        switch (self) {
+            .list => |list| {
+                return list;
+            },
+            else => return MalTypeError.IllegalType,
         }
     }
 };
@@ -161,7 +203,7 @@ pub const Reader = struct {
     // peek and next error throwing need better consideration.
     fn peek(self: Reader) !Token {
         if (self.token_curr >= self.tokens.items.len) {
-            return Error.Overflow;
+            return ReaderError.Overflow;
         }
 
         const token = self.tokens.items[self.token_curr];
@@ -172,7 +214,7 @@ pub const Reader = struct {
         const token = self.peek() catch unreachable;
         self.token_curr += 1;
         if (self.token_curr >= self.tokens.items.len) {
-            return Error.EOF;
+            return ReaderError.EOF;
         }
 
         return token;
@@ -189,7 +231,7 @@ pub const Reader = struct {
             // See if assertion is required
             if (char == SExprStart) {
                 const list = self.read_list() catch |err| switch (err) {
-                    Error.UnmatchedSExpr => {
+                    ReaderError.UnmatchedSExpr => {
                         logz.err()
                             .fmt("[LOG]", "statement missed matched parenthesis", .{})
                             .log();
@@ -245,15 +287,15 @@ pub const Reader = struct {
         } else |err| {
             switch (err) {
                 // TODO: Need to handle, see if log or throw it out
-                Error.Overflow => {},
+                ReaderError.Overflow => {},
                 // Expected case
-                Error.EOF => {},
+                ReaderError.EOF => {},
                 else => {},
             }
         }
 
         if (!end) {
-            return Error.UnmatchedSExpr;
+            return ReaderError.UnmatchedSExpr;
         }
 
         // NOTE: Free the memory later to avoid memory leakage
@@ -329,6 +371,7 @@ test "Reader" {
     {
         var sym1 = Reader.init(allocator, "test");
         defer sym1.deinit();
+
         debug.assert(sym1.ast_root == .symbol);
     }
 
@@ -336,23 +379,17 @@ test "Reader" {
     {
         var b1 = Reader.init(allocator, "t");
         defer b1.deinit();
+
         debug.assert(b1.ast_root == .boolean);
-        switch (b1.ast_root) {
-            .boolean => |root_boolean| {
-                debug.assert(root_boolean == true);
-            },
-            else => unreachable,
-        }
+        const boolean1 = b1.ast_root.as_boolean() catch unreachable;
+        debug.assert(boolean1 == true);
 
         var b2 = Reader.init(allocator, "nil");
         defer b2.deinit();
+
         debug.assert(b2.ast_root == .boolean);
-        switch (b2.ast_root) {
-            .boolean => |root_boolean| {
-                debug.assert(root_boolean == false);
-            },
-            else => unreachable,
-        }
+        const boolean2 = b2.ast_root.as_boolean() catch unreachable;
+        debug.assert(boolean2 == false);
     }
 
     // Number cases
@@ -366,80 +403,58 @@ test "Reader" {
     {
         var str1 = Reader.init(allocator, "\"test\"");
         defer str1.deinit();
+
         debug.assert(str1.ast_root == .string);
-        switch (str1.ast_root) {
-            .string => |root_string| {
-                debug.assert(mem.eql(u8, root_string.items, "test"));
-            },
-            else => unreachable,
-        }
+        const string1 = str1.ast_root.as_string() catch unreachable;
+        debug.assert(mem.eql(u8, string1.items, "test"));
 
         // Read case: "te\"st"
         // Stored result: te"st
         var str2 = Reader.init(allocator, "\"te\\\"st\"");
         defer str2.deinit();
-        debug.assert(str2.ast_root == .string);
 
-        switch (str2.ast_root) {
-            .string => |root_string| {
-                debug.assert(mem.eql(u8, root_string.items, "te\"st"));
-            },
-            else => unreachable,
-        }
+        debug.assert(str2.ast_root == .string);
+        const string2 = str2.ast_root.as_string() catch unreachable;
+        debug.assert(mem.eql(u8, string2.items, "te\"st"));
 
         var str3 = Reader.init(allocator, "\"te\\st\"");
         defer str3.deinit();
-        debug.assert(str3.ast_root == .string);
 
-        switch (str3.ast_root) {
-            .string => |root_string| {
-                debug.assert(mem.eql(u8, root_string.items, "te\\st"));
-            },
-            else => unreachable,
-        }
+        debug.assert(str3.ast_root == .string);
+        const string3 = str3.ast_root.as_string() catch unreachable;
+        debug.assert(mem.eql(u8, string3.items, "te\\st"));
     }
 
     // Simple list cases
     {
         var l1 = Reader.init(allocator, "(\"test\")");
         defer l1.deinit();
+
         debug.assert(l1.ast_root == .list);
-        switch (l1.ast_root) {
-            .list => |list| {
-                debug.assert(list.items[0] == .string);
-                switch (list.items[0]) {
-                    .string => |str| {
-                        debug.assert(mem.eql(u8, str.items, "test"));
-                    },
-                    else => unreachable,
-                }
-            },
-            else => unreachable,
-        }
+
+        const list1 = l1.ast_root.as_list() catch unreachable;
+        debug.assert(list1.items[0] == .string);
+        const string1 = list1.items[0].as_string() catch unreachable;
+        debug.assert(mem.eql(u8, string1.items, "test"));
     }
 
     // Multiple lists cases
     {
         var l2 = Reader.init(allocator, "((1) (2))");
         defer l2.deinit();
+
         debug.assert(l2.ast_root == .list);
-        switch (l2.ast_root) {
-            .list => |root_list| {
-                debug.assert(root_list.items[0] == .list);
-                switch (root_list.items[0]) {
-                    .list => |list| {
-                        switch (list.items[0]) {
-                            .number => |num| {
-                                debug.assert(num.value == 1);
-                            },
-                            else => unreachable,
-                        }
-                    },
-                    else => unreachable,
-                }
-            },
-            else => unreachable,
-        }
+        const list2 = l2.ast_root.as_list() catch unreachable;
+        debug.assert(list2.items[0] == .list);
+        const sub_list1 = list2.items[0].as_list() catch unreachable;
+        debug.assert(sub_list1.items[0] == .number);
+        const sub_list1_val = sub_list1.items[0].as_number() catch unreachable;
+        debug.assert(sub_list1_val.value == 1);
+
+        const sub_list2 = list2.items[1].as_list() catch unreachable;
+        debug.assert(sub_list2.items[0] == .number);
+        const sub_list2_val = sub_list2.items[0].as_number() catch unreachable;
+        debug.assert(sub_list2_val.value == 2);
     }
 
     // Incompleted cases
