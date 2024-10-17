@@ -20,7 +20,7 @@ The base of this project, largely based on https://github.com/kanaka/mal/blob/ma
   - [x] Add the function `read_list` to reader.qx (c1cc4e5)
   - [x] Add the function `read_atom` to reader.qx (c1cc4e5)
   - [x] Add the function `pr_str` in printer.qx. To support printing the string representation of a mal data structure (c1cc4e5)
-  - [ ] Add support for the other basic data type to your reader and printer functions: string, nil, true, and false
+  - [x] Add support for the other basic data type to your reader and printer functions: string, nil, true, and false (#15/65a1e38)
   - [x] Add error checking to your reader functions to make sure parens are properly matched (c1cc4e5)
   - [ ] Add support for reader macros which are forms that are transformed into other forms during the read phase
   - [ ] Add support for the other mal types: keyword, vector, hash-map
