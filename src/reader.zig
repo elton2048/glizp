@@ -364,6 +364,8 @@ pub const Reader = struct {
     }
 };
 
+const testing = std.testing;
+
 test "Reader" {
     const allocator = std.testing.allocator;
 
@@ -372,7 +374,7 @@ test "Reader" {
         var sym1 = Reader.init(allocator, "test");
         defer sym1.deinit();
 
-        debug.assert(sym1.ast_root == .symbol);
+        try testing.expect(sym1.ast_root == .symbol);
     }
 
     // Boolean cases
@@ -380,23 +382,23 @@ test "Reader" {
         var b1 = Reader.init(allocator, "t");
         defer b1.deinit();
 
-        debug.assert(b1.ast_root == .boolean);
+        try testing.expect(b1.ast_root == .boolean);
         const boolean1 = b1.ast_root.as_boolean() catch unreachable;
-        debug.assert(boolean1 == true);
+        try testing.expectEqual(true, boolean1);
 
         var b2 = Reader.init(allocator, "nil");
         defer b2.deinit();
 
-        debug.assert(b2.ast_root == .boolean);
+        try testing.expect(b2.ast_root == .boolean);
         const boolean2 = b2.ast_root.as_boolean() catch unreachable;
-        debug.assert(boolean2 == false);
+        try testing.expectEqual(false, boolean2);
     }
 
     // Number cases
     {
         var n1 = Reader.init(allocator, "1");
         defer n1.deinit();
-        debug.assert(n1.ast_root == .number);
+        try testing.expect(n1.ast_root == .number);
     }
 
     // String cases
@@ -404,25 +406,25 @@ test "Reader" {
         var str1 = Reader.init(allocator, "\"test\"");
         defer str1.deinit();
 
-        debug.assert(str1.ast_root == .string);
+        try testing.expect(str1.ast_root == .string);
         const string1 = str1.ast_root.as_string() catch unreachable;
-        debug.assert(mem.eql(u8, string1.items, "test"));
+        try testing.expectEqualStrings("test", string1.items);
 
         // Read case: "te\"st"
         // Stored result: te"st
         var str2 = Reader.init(allocator, "\"te\\\"st\"");
         defer str2.deinit();
 
-        debug.assert(str2.ast_root == .string);
+        try testing.expect(str2.ast_root == .string);
         const string2 = str2.ast_root.as_string() catch unreachable;
-        debug.assert(mem.eql(u8, string2.items, "te\"st"));
+        try testing.expectEqualStrings("te\"st", string2.items);
 
         var str3 = Reader.init(allocator, "\"te\\st\"");
         defer str3.deinit();
 
-        debug.assert(str3.ast_root == .string);
+        try testing.expect(str3.ast_root == .string);
         const string3 = str3.ast_root.as_string() catch unreachable;
-        debug.assert(mem.eql(u8, string3.items, "te\\st"));
+        try testing.expectEqualStrings("te\\st", string3.items);
     }
 
     // Simple list cases
@@ -430,12 +432,12 @@ test "Reader" {
         var l1 = Reader.init(allocator, "(\"test\")");
         defer l1.deinit();
 
-        debug.assert(l1.ast_root == .list);
+        try testing.expect(l1.ast_root == .list);
 
         const list1 = l1.ast_root.as_list() catch unreachable;
-        debug.assert(list1.items[0] == .string);
+        try testing.expect(list1.items[0] == .string);
         const string1 = list1.items[0].as_string() catch unreachable;
-        debug.assert(mem.eql(u8, string1.items, "test"));
+        try testing.expectEqualStrings("test", string1.items);
     }
 
     // Multiple lists cases
@@ -443,18 +445,19 @@ test "Reader" {
         var l2 = Reader.init(allocator, "((1) (2))");
         defer l2.deinit();
 
-        debug.assert(l2.ast_root == .list);
+        try testing.expect(l2.ast_root == .list);
+
         const list2 = l2.ast_root.as_list() catch unreachable;
-        debug.assert(list2.items[0] == .list);
+        try testing.expect(list2.items[0] == .list);
         const sub_list1 = list2.items[0].as_list() catch unreachable;
-        debug.assert(sub_list1.items[0] == .number);
+        try testing.expect(sub_list1.items[0] == .number);
         const sub_list1_val = sub_list1.items[0].as_number() catch unreachable;
-        debug.assert(sub_list1_val.value == 1);
+        try testing.expectEqual(1, sub_list1_val.value);
 
         const sub_list2 = list2.items[1].as_list() catch unreachable;
-        debug.assert(sub_list2.items[0] == .number);
+        try testing.expect(sub_list2.items[0] == .number);
         const sub_list2_val = sub_list2.items[0].as_number() catch unreachable;
-        debug.assert(sub_list2_val.value == 2);
+        try testing.expectEqual(2, sub_list2_val.value);
     }
 
     // Incompleted cases
@@ -462,6 +465,6 @@ test "Reader" {
         var incompleted_list1 = Reader.init(allocator, "(1");
         defer incompleted_list1.deinit();
 
-        debug.assert(incompleted_list1.ast_root == .Incompleted);
+        try testing.expect(incompleted_list1.ast_root == .Incompleted);
     }
 }

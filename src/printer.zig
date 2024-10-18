@@ -77,6 +77,8 @@ fn initStringArrayList(allocator: mem.Allocator, str: []const u8) ArrayList(u8) 
     return al;
 }
 
+const testing = std.testing;
+
 test "printer" {
     const allocator = std.testing.allocator;
 
@@ -85,12 +87,12 @@ test "printer" {
         const bool_true = MalType{ .boolean = true };
 
         const bool_true_result = pr_str(bool_true, true);
-        debug.assert(mem.eql(u8, bool_true_result, "t"));
+        try testing.expectEqualStrings("t", bool_true_result);
 
         const bool_false = MalType{ .boolean = false };
 
         const bool_false_result = pr_str(bool_false, true);
-        debug.assert(mem.eql(u8, bool_false_result, "nil"));
+        try testing.expectEqualStrings("nil", bool_false_result);
     }
 
     // Test for string case
@@ -101,9 +103,9 @@ test "printer" {
         const str1 = MalType{ .string = str1_al };
 
         const str1_readably_result = pr_str(str1, true);
-        debug.assert(mem.eql(u8, str1_readably_result, "\"test\""));
+        try testing.expectEqualStrings("\"test\"", str1_readably_result);
         const str1_non_readably_result = pr_str(str1, false);
-        debug.assert(mem.eql(u8, str1_non_readably_result, "\"test\""));
+        try testing.expectEqualStrings("\"test\"", str1_non_readably_result);
 
         const str2_al = initStringArrayList(allocator, "te\"st");
         defer str2_al.deinit();
@@ -113,9 +115,9 @@ test "printer" {
         // stored value: "te"st"
         // readably result: "te\"st" (escaped doublequote inside)
         const str2_readably_result = pr_str(str2, true);
-        debug.assert(mem.eql(u8, str2_readably_result, "\"te\\\"st\""));
+        try testing.expectEqualStrings("\"te\\\"st\"", str2_readably_result);
         const str2_non_readably_result = pr_str(str2, false);
-        debug.assert(mem.eql(u8, str2_non_readably_result, "\"te\"st\""));
+        try testing.expectEqualStrings("\"te\"st\"", str2_non_readably_result);
 
         const str3_al = initStringArrayList(allocator, "\\");
         defer str3_al.deinit();
@@ -125,9 +127,9 @@ test "printer" {
         // stored value: "\"
         // readably result: "\\" (escaped backslash inside)
         const str3_readably_result = pr_str(str3, true);
-        debug.assert(mem.eql(u8, str3_readably_result, "\"\\\\\""));
+        try testing.expectEqualStrings("\"\\\\\"", str3_readably_result);
         const str3_non_readably_result = pr_str(str3, false);
-        debug.assert(mem.eql(u8, str3_non_readably_result, "\"\\\""));
+        try testing.expectEqualStrings("\"\\\"", str3_non_readably_result);
 
         const str4_al = initStringArrayList(allocator, "te\\\"st");
         defer str4_al.deinit();
@@ -137,9 +139,9 @@ test "printer" {
         // stored value: "te\"st"
         // readably result: "te\\\"st" (escaped backslash and doublequote inside)
         const str4_readably_result = pr_str(str4, true);
-        debug.assert(mem.eql(u8, str4_readably_result, "\"te\\\\\\\"st\""));
+        try testing.expectEqualStrings("\"te\\\\\\\"st\"", str4_readably_result);
         const str4_non_readably_result = pr_str(str4, false);
-        debug.assert(mem.eql(u8, str4_non_readably_result, "\"te\\\"st\""));
+        try testing.expectEqualStrings("\"te\\\"st\"", str4_non_readably_result);
     }
 
     // Test for list case
@@ -159,6 +161,6 @@ test "printer" {
         const list1 = MalType{ .list = list1_al };
         const list1_result = pr_str(list1, true);
 
-        debug.assert(mem.eql(u8, list1_result, "(\"1\" \"2\")"));
+        try testing.expectEqualStrings("(\"1\" \"2\")", list1_result);
     }
 }
