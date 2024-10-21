@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
 const u8_MAX = constants.u8_MAX;
@@ -530,67 +529,90 @@ pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
     };
 }
 
+const testing = std.testing;
+
 test "InputEvent" {
     const inputEventKeyA = InputEvent.init(&u32ToBytes("\x41\xff\xff\xff"));
-    assert(inputEventKeyA.key.char == .A);
-    assert(inputEventKeyA.ctrl == false);
-    assert(inputEventKeyA.alt == false);
-    assert(inputEventKeyA.shift == true);
-    assert(std.mem.eql(u8, inputEventKeyA.raw, "\x41"));
+    try testing.expectEqual(.A, inputEventKeyA.key.char);
+    try testing.expectEqual(false, inputEventKeyA.ctrl);
+    try testing.expectEqual(false, inputEventKeyA.alt);
+    try testing.expectEqual(true, inputEventKeyA.shift);
+    try testing.expectEqualStrings("\x41", inputEventKeyA.raw);
 
     const inputEventKeya = InputEvent.init(&u32ToBytes("\x61\xff\xff\xff"));
-    assert(inputEventKeya.key.char == .A);
-    assert(inputEventKeya.ctrl == false);
-    assert(inputEventKeya.alt == false);
-    assert(inputEventKeya.shift == false);
-    assert(std.mem.eql(u8, inputEventKeya.raw, "\x61"));
+    try testing.expectEqual(.A, inputEventKeya.key.char);
+    try testing.expectEqual(false, inputEventKeya.ctrl);
+    try testing.expectEqual(false, inputEventKeya.alt);
+    try testing.expectEqual(false, inputEventKeya.shift);
+    try testing.expectEqualStrings("\x61", inputEventKeya.raw);
 
     const inputEventKeyZ = InputEvent.init(&u32ToBytes("\x5a\xff\xff\xff"));
-    assert(inputEventKeyZ.key.char == .Z);
-    assert(inputEventKeyZ.ctrl == false);
-    assert(inputEventKeyZ.alt == false);
-    assert(inputEventKeyZ.shift == true);
-    assert(std.mem.eql(u8, inputEventKeyZ.raw, "\x5a"));
+    try testing.expectEqual(.Z, inputEventKeyZ.key.char);
+    try testing.expectEqual(false, inputEventKeyZ.ctrl);
+    try testing.expectEqual(false, inputEventKeyZ.alt);
+    try testing.expectEqual(true, inputEventKeyZ.shift);
+    try testing.expectEqualStrings("\x5a", inputEventKeyZ.raw);
 
     const inputEventEof = InputEvent.init(&u32ToBytes("\x04\xff\xff\xff"));
-    assert(inputEventEof.key.char == .D);
-    assert(inputEventEof.ctrl == true);
-    assert(inputEventEof.alt == false);
-    assert(inputEventEof.shift == false);
+    try testing.expectEqual(.D, inputEventEof.key.char);
+    try testing.expectEqual(true, inputEventEof.ctrl);
+    try testing.expectEqual(false, inputEventEof.alt);
+    try testing.expectEqual(false, inputEventEof.shift);
+    try testing.expectEqualStrings("\x04", inputEventEof.raw);
 
     const inputEventEscape = InputEvent.init(&u32ToBytes("\x1b\xff\xff\xff"));
-    assert(inputEventEscape.key.char == .Escape);
-    assert(inputEventEscape.ctrl == true);
-    assert(inputEventEscape.alt == false);
-    assert(inputEventEscape.shift == false);
+    try testing.expectEqual(.Escape, inputEventEscape.key.char);
+    try testing.expectEqual(true, inputEventEscape.ctrl);
+    try testing.expectEqual(false, inputEventEscape.alt);
+    try testing.expectEqual(false, inputEventEscape.shift);
+    try testing.expectEqualStrings("\x1b", inputEventEscape.raw);
 
     const inputEventEscapeShort = InputEvent.init(&u32ToBytes("\x1b"));
-    assert(inputEventEscapeShort.key.char == .Escape);
-    assert(std.mem.eql(u8, inputEventEscapeShort.raw, "\x1b"));
+    try testing.expectEqual(.Escape, inputEventEscapeShort.key.char);
+    try testing.expectEqual(true, inputEventEscapeShort.ctrl);
+    try testing.expectEqual(false, inputEventEscapeShort.alt);
+    try testing.expectEqual(false, inputEventEscapeShort.shift);
+    try testing.expectEqualStrings("\x1b", inputEventEscapeShort.raw);
 
     const inputEventKey0Short = InputEvent.init(&u32ToBytes("\x30"));
-    assert(inputEventKey0Short.key.char == .Key0);
-    assert(std.mem.eql(u8, inputEventKey0Short.raw, "\x30"));
+    try testing.expectEqual(.Key0, inputEventKey0Short.key.char);
+    try testing.expectEqual(false, inputEventKey0Short.ctrl);
+    try testing.expectEqual(false, inputEventKey0Short.alt);
+    try testing.expectEqual(false, inputEventKey0Short.shift);
+    try testing.expectEqualStrings("\x30", inputEventKey0Short.raw);
 
     const inputEventKey9Short = InputEvent.init(&u32ToBytes("\x39"));
-    assert(inputEventKey9Short.key.char == .Key9);
-    assert(std.mem.eql(u8, inputEventKey9Short.raw, "\x39"));
+    try testing.expectEqual(.Key9, inputEventKey9Short.key.char);
+    try testing.expectEqual(false, inputEventKey9Short.ctrl);
+    try testing.expectEqual(false, inputEventKey9Short.alt);
+    try testing.expectEqual(false, inputEventKey9Short.shift);
+    try testing.expectEqualStrings("\x39", inputEventKey9Short.raw);
 
     const inputEventSpace = InputEvent.init(&u32ToBytes("\x20\xff\xff\xff"));
-    assert(inputEventSpace.key.char == .Space);
-    assert(std.mem.eql(u8, inputEventSpace.raw, "\x20"));
+    try testing.expectEqual(.Space, inputEventSpace.key.char);
+    try testing.expectEqual(false, inputEventSpace.ctrl);
+    try testing.expectEqual(false, inputEventSpace.alt);
+    try testing.expectEqual(false, inputEventSpace.shift);
+    try testing.expectEqualStrings("\x20", inputEventSpace.raw);
 
     const inputEventBackspaceShort = InputEvent.init(&u32ToBytes("\x7f"));
-    assert(inputEventBackspaceShort.key.char == .Backspace);
-    assert(std.mem.eql(u8, inputEventBackspaceShort.raw, "\x7f"));
+    try testing.expectEqual(.Backspace, inputEventBackspaceShort.key.char);
+    try testing.expectEqual(false, inputEventBackspaceShort.ctrl);
+    try testing.expectEqual(false, inputEventBackspaceShort.alt);
+    try testing.expectEqual(false, inputEventBackspaceShort.shift);
+    try testing.expectEqualStrings("\x7f", inputEventBackspaceShort.raw);
 
     const inputEventMetaN = InputEvent.init(&u32ToBytes("\x1b\x6e\xff\xff"));
-    assert(inputEventMetaN.ctrl == false);
-    assert(inputEventMetaN.alt == true);
+    try testing.expectEqual(.N, inputEventMetaN.key.char);
+    try testing.expectEqual(false, inputEventMetaN.ctrl);
+    try testing.expectEqual(true, inputEventMetaN.alt);
+    try testing.expectEqual(false, inputEventMetaN.shift);
+    try testing.expectEqualStrings("\x1b\x6e", inputEventMetaN.raw);
 
     const inputEventArrowUp = InputEvent.init(&u32ToBytes("\x1b\x5b\x41\xff"));
-    assert(inputEventArrowUp.ctrl == false);
-    assert(inputEventArrowUp.alt == false);
-    assert(inputEventArrowUp.key.functional == .ArrowUp);
-    assert(std.mem.eql(u8, inputEventArrowUp.raw, "\x1b\x5b\x41"));
+    try testing.expectEqual(.ArrowUp, inputEventArrowUp.key.functional);
+    try testing.expectEqual(false, inputEventArrowUp.ctrl);
+    try testing.expectEqual(false, inputEventArrowUp.alt);
+    try testing.expectEqual(false, inputEventArrowUp.shift);
+    try testing.expectEqualStrings("\x1b\x5b\x41", inputEventArrowUp.raw);
 }
