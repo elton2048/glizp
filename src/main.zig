@@ -9,8 +9,10 @@ const u8_MAX = constants.u8_MAX;
 
 const token_reader = @import("reader.zig");
 const printer = @import("printer.zig");
+const data = @import("data.zig");
 
 const ArrayList = std.ArrayList;
+const MalType = token_reader.MalType;
 
 // TODO: Provide check for termios based on OS
 const posix = std.posix;
@@ -85,7 +87,7 @@ fn read(reader: std.fs.File.Reader) [INPUT_BYTE_SIZE]u8 {
 
 /// Parsing the statament into AST using PCRE/JSON encoder/decoder.
 /// Can this potentially use tree-sitter?
-fn parsing_statement(statement: []const u8) void {
+fn parsing_statement(statement: []const u8) *token_reader.Reader {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const general_allocator = gpa_allocator.allocator();
 
@@ -97,6 +99,8 @@ fn parsing_statement(statement: []const u8) void {
     logz.info()
         .fmt("[LOG]", "print: {any}", .{str})
         .log();
+
+    return read_result;
 }
 
 /// Parsing function, which could be a part of Parser later
@@ -235,6 +239,8 @@ pub const Shell = struct {
     buffer_pos: usize,
     /// Denotes the buffer cursor.
     buffer_cursor: Position,
+    /// Current reader instance
+    curr_read: *token_reader.Reader,
 
     /// Config info about the shell
     config: *ShellConfig,
@@ -419,6 +425,7 @@ pub const Shell = struct {
                 .x = 0,
                 .y = 0,
             },
+            .curr_read = undefined,
             .config = config,
         };
 
@@ -463,7 +470,7 @@ pub const Shell = struct {
 
         const read_result = try self.*.read(current_gpa_allocator);
 
-        try self.*.eval();
+        try self.*.eval(self.curr_read.ast_root);
         try self.*.print(read_result);
 
         current_gpa_allocator.free(read_result);
@@ -531,7 +538,12 @@ pub const Shell = struct {
                                 continue;
                             }
 
-                            parsing_statement(statement);
+                            // TODO: Parsing the latest statement and store
+                            // in the Shell within the function. This makes
+                            // function non-pure such that it makes testing
+                            // more difficult. Need a more modular approach
+                            // for this.
+                            self.*.curr_read = parsing_statement(statement);
 
                             try self.*.history.append(statement);
                             // Reset history
@@ -623,12 +635,33 @@ pub const Shell = struct {
         }
     }
 
-    fn eval(self: *Shell) !void {
+    fn eval(self: *Shell, item: MalType) !void {
         _ = self;
-        // TODO: eval logic
-        // A more robust design would be reading all the input one-by-one
-        // In emacs the reading is done by each char level
-        // This is actually not a part of the shell.
+        switch (item) {
+            .list => |list| {
+                // NOTE: Check if the first item is a symbol,
+                // search the function table to see if it is a valid
+                // function to run, append the params into the function
+                // For non-symbol type, treat the whole items as a simple list
+                const params = list.items[1..];
+                switch (list.items[0]) {
+                    .symbol => |symbol| {
+                        if (data.EVAL_TABLE.get(symbol)) |func| {
+                            const fnValue: MalType = try @call(.auto, func, .{params});
+                            // TODO: Wrap this in Terminal struct
+                            const stdout = std.io.getStdOut();
+                            const stdout_file = stdout.writer();
+                            try stdout_file.writeAll(printer.pr_str(fnValue, true));
+                            try stdout_file.writeAll("\n");
+                        } else {
+                            utils.log("SYMBOL", "Not implemented");
+                        }
+                    },
+                    else => {},
+                }
+            },
+            else => {},
+        }
     }
 
     fn print(self: *Shell, string: []const u8) !void {
