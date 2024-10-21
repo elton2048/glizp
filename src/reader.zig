@@ -34,6 +34,8 @@ pub const MalTypeError = error{
     IllegalType,
 };
 
+pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
+
 pub const Number = struct {
     // TODO: Support for floating point
     value: u64,
