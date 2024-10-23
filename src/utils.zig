@@ -103,6 +103,45 @@ pub fn parseU64(buf: []const u8, radix: u8) !u64 {
     return x;
 }
 
+pub fn parseI64(buf: []const u8, radix: u8) !i64 {
+    var x: i64 = 0;
+    var negate = false;
+
+    for (buf, 0..) |c, i| {
+        const digit = charToDigit(c);
+
+        if (i == 0) {
+            if (digit >= radix) {
+                if (c == '-') {
+                    negate = true;
+                    continue;
+                } else {
+                    return error.InvalidChar;
+                }
+            }
+        }
+
+        // x *= radix
+        var ov = @mulWithOverflow(x, radix);
+        if (ov[1] != 0) return error.OverFlow;
+
+        // x += digit
+        ov = @addWithOverflow(ov[0], digit);
+        if (ov[1] != 0) return error.OverFlow;
+        x = ov[0];
+    }
+
+    if (negate) {
+        // TODO: Handle the max_int negation case
+        const ov = @subWithOverflow(0, x);
+        if (ov[1] != 0) return error.OverFlow;
+
+        x = ov[0];
+    }
+
+    return x;
+}
+
 fn charToDigit(c: u8) u8 {
     return switch (c) {
         '0'...'9' => c - '0',
@@ -112,7 +151,50 @@ fn charToDigit(c: u8) u8 {
     };
 }
 
+const testing = std.testing;
+
 test "parse u64" {
-    const result = try parseU64("1234", 10);
-    try std.testing.expect(result == 1234);
+    const num1 = try parseU64("1234", 10);
+    try testing.expect(num1 == 1234);
+
+    if (parseU64("-1234", 10)) |_| unreachable else |err| {
+        try testing.expectEqual(error.InvalidChar, err);
+    }
+
+    // 18,446,744,073,709,551,615; which is max of 64-bit unsigned integer
+    const max_pos_u64 = try parseU64("18446744073709551615", 10);
+    try testing.expect(max_pos_u64 == 18446744073709551615);
+
+    if (parseU64("18446744073709551616", 10)) |_| unreachable else |err| {
+        try testing.expectEqual(error.OverFlow, err);
+    }
+}
+
+test "parse i64" {
+    const num1 = try parseI64("1234", 10);
+    try testing.expect(num1 == 1234);
+
+    const num2 = try parseI64("-1234", 10);
+    try testing.expect(num2 == -1234);
+
+    const num0 = try parseI64("0", 10);
+    try testing.expect(num0 == 0);
+
+    const neg_num0 = try parseI64("-0", 10);
+    try testing.expect(neg_num0 == 0);
+
+    // 9,223,372,036,854,775,807; which is max of 64-bit signed integer
+    const max_pos_i64 = try parseI64("9223372036854775807", 10);
+    try testing.expect(max_pos_i64 == 9223372036854775807);
+
+    const max_neg_i64 = try parseI64("-9223372036854775807", 10);
+    try testing.expect(max_neg_i64 == -9223372036854775807);
+
+    if (parseI64("9223372036854775808", 10)) |_| unreachable else |err| {
+        try testing.expectEqual(error.OverFlow, err);
+    }
+
+    if (parseI64("-9223372036854775808", 10)) |_| unreachable else |err| {
+        try testing.expectEqual(error.OverFlow, err);
+    }
 }
