@@ -410,28 +410,9 @@ pub const Shell = struct {
     }
 
     fn eval(self: *Shell, item: MalType) !void {
-        switch (item) {
-            .list => |list| {
-                // NOTE: Check if the first item is a symbol,
-                // search the function table to see if it is a valid
-                // function to run, append the params into the function
-                // For non-symbol type, treat the whole items as a simple list
-                const params = list.items[1..];
-                switch (list.items[0]) {
-                    .symbol => |symbol| {
-                        if (data.EVAL_TABLE.get(symbol)) |func| {
-                            const fnValue: MalType = try @call(.auto, func, .{params});
-                            try self.frontend.print(printer.pr_str(fnValue, true));
-                            try self.frontend.print("\n");
-                        } else {
-                            utils.log("SYMBOL", "Not implemented");
-                        }
-                    },
-                    else => {},
-                }
-            },
-            else => {},
-        }
+        const fnValue = try token_reader.apply(item);
+        try self.frontend.print(printer.pr_str(fnValue, true));
+        try self.frontend.print("\n");
     }
 
     pub fn quit(self: *Shell) void {
