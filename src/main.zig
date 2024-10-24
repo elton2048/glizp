@@ -14,12 +14,8 @@ const data = @import("data.zig");
 const ArrayList = std.ArrayList;
 const MalType = token_reader.MalType;
 
-// TODO: Provide check for termios based on OS
-const posix = std.posix;
-
-const cc_VTIME = 5;
-const cc_VMIN = 6;
-const INPUT_INTERVAL_IN_MS = 1000;
+const Frontend = @import("Frontend.zig");
+const Terminal = @import("terminal.zig").Terminal;
 
 // NOTE: Shall be OS-dependent, to support different emoji it may require
 // to be 8 too.
@@ -31,43 +27,7 @@ const ByteParsingError = error{
     EndOfStream,
 };
 
-/// Terminal escape control statement
-/// These shall be abstracted into Terminal layer later, see #12
-/// Move cursor up by {d} lines
-const TERM_MOVE_CURSOR_UP = "\x1b[{d}A";
-/// Move cursor down by {d} lines
-const TERM_MOVE_CURSOR_DOWN = "\x1b[{d}B";
-/// Move cursor right by {d} columns
-const TERM_MOVE_CURSOR_RIGHT = "\x1b[{d}C";
-/// Move cursor left by {d} columns
-const TERM_MOVE_CURSOR_LEFT = "\x1b[{d}D";
-
-/// Command to move cursor in terminal in general
-const TERM_MOVE_CURSOR = "\x1b[{d}{c}";
-
-/// Command to erase from cursor position
-const TERM_ERASE_FROM_CURSOR = "\x1b[0K";
-
-/// Command to get current cursor position
-const TERM_REQ_CURSOR_POS = "\x1b[6n";
-
-/// Max steps for the terminal to move. Used to check the frame size
-const TERM_MAX_STEPS: usize = 999;
-
-/// Available direction in two-dimension. The internal representation
-/// is for terminal movement.
-pub const Direction = enum(u8) {
-    Up = 'A',
-    Down = 'B',
-    Right = 'C',
-    Left = 'D',
-};
-
-/// Two-dimensional position representation.
-pub const Position = struct {
-    x: usize,
-    y: usize,
-};
+const Position = Frontend.Position;
 
 // Currently for macOS. Can this cater for other OS?
 // NOTE: How many bytes to represent an input makes sense?
@@ -136,101 +96,22 @@ fn parsing_byte(reader: std.fs.File.Reader) anyerror!keymap.InputEvent {
     return inputEvent;
 }
 
-// backspace function aligns both stdout and array list to store byte.
-// wrapped corresponding params into struct later.
-// TODO: For multiple bytes case it is incorrect now, like emoji input.
-fn backspace(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), pos: usize) !void {
-    const charIndex = pos - 1;
-
-    // Erase the previous byte
-    if (optional_arrayList) |arrayList| {
-        _ = arrayList.*.orderedRemove(charIndex);
-    }
-
-    const stdout_file = stdout.writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout_writer = bw.writer();
-
-    // terminal display; assume to be in raw mode
-    try stdout_writer.writeByte('\u{0008}');
-    try stdout_writer.writeByte('\u{0020}');
-    try stdout_writer.writeByte('\u{0008}');
-
-    if (optional_arrayList) |arrayList| {
-        var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = temp_allocator.allocator();
-
-        // Adjustment for the string after cursor
-        const steps = arrayList.items.len - charIndex;
-        if (steps > 0) {
-            try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
-            try stdout_writer.writeAll(arrayList.items[charIndex..]);
-
-            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
-            defer allocator.free(move);
-
-            try stdout_writer.writeAll(move);
-        }
-    }
-
-    try bw.flush();
-}
-
-// wrapped corresponding params into struct later.
-fn appendByte(stdout: std.fs.File, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: usize) !void {
-    if (optional_arrayList) |arrayList| {
-        try arrayList.insert(pos, byte);
-    }
-    const stdout_file = stdout.writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout_writer = bw.writer();
-
-    if (optional_arrayList) |arrayList| {
-        var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = temp_allocator.allocator();
-
-        if (pos > 0) {
-            const move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{pos}) catch unreachable;
-            defer allocator.free(move);
-
-            try stdout_writer.writeAll(move);
-            // Clear the line
-            try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
-        }
-        try stdout_writer.writeAll(arrayList.items);
-
-        // Adjust the cursor if necessary
-        const steps = arrayList.items.len - pos - 1;
-        if (steps > 0) {
-            const adjust_move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
-            defer allocator.free(adjust_move);
-
-            try stdout_writer.writeAll(adjust_move);
-        }
-    } else {
-        try stdout_writer.writeByte(byte);
-    }
-    try bw.flush();
-}
-
 pub fn main() !void {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const general_allocator = gpa_allocator.allocator();
 
-    const shell = Shell.init(general_allocator);
-    // FIXME: Running enableRawMode through shell causing issue now. It
-    // keeps the I/O busy s.t. the shell is struck. Mode setting is now
-    // being done from init process, which makes the setting less dynamic.
-    // try shell.enableRawMode();
+    // Check quit method in Shell for frontend deinit. Currenly Terminal
+    // is the frontend
+    const terminal = Terminal.init(general_allocator);
+
+    const shell = Shell.init(general_allocator, terminal);
+
     try shell.run();
 }
 
 pub const Shell = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
-    stdin_fd: *const posix.fd_t,
-    orig_termios: posix.termios,
-    prog_termios: *posix.termios,
 
     history: ArrayList([]u8),
     history_curr: usize,
@@ -244,6 +125,8 @@ pub const Shell = struct {
 
     /// Config info about the shell
     config: *ShellConfig,
+    /// Frontend of the shell
+    frontend: Frontend,
 
     // As (logz) logger is not thread-safe, using a pool for the use
     // of the logger.
@@ -257,125 +140,9 @@ pub const Shell = struct {
     const ShellConfig = struct {
         /// Denote whether the initial config is read
         set: bool,
-        /// Denote the frame size of the shell.
-        frame_size: Position,
     };
 
-    // FIXME: enableRawMode could only be run within init now as it will
-    // keeps the I/O busy s.t. the shell is struck.
-    fn enableRawMode(self: Shell) !void {
-        const stdin_fd = self.stdin_fd;
-        var prog_termios = self.prog_termios;
-        prog_termios.lflag = posix.tc_lflag_t{
-            // .ICANON = true, // ICANON is disabled, requires manual handling
-            .ECHO = false,
-        };
-
-        prog_termios.cc[cc_VMIN] = 0;
-        prog_termios.cc[cc_VTIME] = 0;
-
-        posix.tcsetattr(stdin_fd.*, .NOW, prog_termios.*) catch @panic("Cannot access termios");
-    }
-
-    fn disableRawMode(self: *Shell) !void {
-        const stdin_fd = self.*.stdin_fd;
-        const orig_termios = self.*.orig_termios;
-        try posix.tcsetattr(stdin_fd.*, .NOW, orig_termios);
-    }
-
-    /// TODO: Related to terminal part, shall be extracted to be in Terminal
-    /// struct later, see #12
-    fn term_move(self: *Shell, stdout: std.fs.File, steps: usize, direction: Direction) !void {
-        const stdout_file = stdout.writer();
-        var bw = std.io.bufferedWriter(stdout_file);
-        const stdout_writer = bw.writer();
-
-        const statement = std.fmt.allocPrint(self.allocator, TERM_MOVE_CURSOR, .{ steps, @intFromEnum(direction) }) catch unreachable;
-        defer self.allocator.free(statement);
-
-        try stdout_writer.writeAll(statement);
-
-        try bw.flush();
-    }
-
-    fn moveLeft(self: *Shell, stdout: std.fs.File) !void {
-        if (self.buffer_pos > 0) {
-            try self.term_move(stdout, 1, .Left);
-
-            self.buffer_pos -= 1;
-
-            const cursor = try self.readCursorPos(stdout);
-            self.buffer_cursor = cursor;
-        }
-    }
-
-    fn moveRight(self: *Shell, stdout: std.fs.File, buffer: ArrayList(u8)) !void {
-        if (self.buffer_pos < buffer.items.len) {
-            const prevCursor = try self.readCursorPos(stdout);
-
-            if (prevCursor.x == self.config.frame_size.x) {
-                // Handle the case when cursor is at the end of window
-                try self.term_move(stdout, prevCursor.x - 1, .Left);
-                try self.term_move(stdout, 1, .Down);
-            } else {
-                try self.term_move(stdout, 1, .Right);
-            }
-
-            self.buffer_pos += 1;
-
-            const cursor = try self.readCursorPos(stdout);
-            self.buffer_cursor = cursor;
-        }
-    }
-
-    /// Get the current frame (window in modern term) size.
-    /// In later stage when resize action is detected it should also be
-    /// called to refresh the information back to the Shell.
-    /// Reference: https://viewsourcecode.org/snaptoken/kilo/03.rawInputAndOutput.html#window-size-the-hard-way
-    fn getFrameSize(self: *Shell, stdout: std.fs.File) !Position {
-        const originalPosition = try self.readCursorPos(stdout);
-        // NOTE: Shortcut for now.
-        // Probably not updating the buffer cursor here if there are multiple
-        // windows implemented.
-        self.buffer_cursor = originalPosition;
-
-        try self.term_move(stdout, TERM_MAX_STEPS, .Right);
-        try self.term_move(stdout, TERM_MAX_STEPS, .Down);
-
-        const frameSize = try self.readCursorPos(stdout);
-
-        try self.term_move(stdout, frameSize.x - originalPosition.x, .Left);
-        try self.term_move(stdout, frameSize.y - originalPosition.y, .Up);
-
-        return frameSize;
-    }
-
-    fn readCursorPos(self: *Shell, stdout: std.fs.File) !Position {
-        const reader = self.*.stdin.reader();
-
-        const stdout_file = stdout.writer();
-        var bw = std.io.bufferedWriter(stdout_file);
-        const stdout_writer = bw.writer();
-
-        try stdout_writer.writeAll(TERM_REQ_CURSOR_POS);
-
-        try bw.flush();
-
-        // Reference for delimiter: https://vt100.net/docs/vt100-ug/chapter3.html#CPR
-        _ = try reader.readBytesNoEof(2);
-        const row_str = reader.readUntilDelimiterAlloc(self.allocator, 59, 8) catch unreachable;
-        const column_str = reader.readUntilDelimiterAlloc(self.allocator, 'R', 8) catch unreachable;
-
-        const row = utils.parseU64(row_str, 10) catch @panic("Unexpected non number value");
-        const column = utils.parseU64(column_str, 10) catch @panic("Unexpected non number value");
-
-        return Position{
-            .x = column,
-            .y = row,
-        };
-    }
-
-    pub fn init(allocator: std.mem.Allocator) *Shell {
+    pub fn init(allocator: std.mem.Allocator, terminal: *Terminal) *Shell {
         // NOTE: Currently the logger cannot be configured to log in
         // multiple outputs (like stdout then file)
         logz.setup(allocator, .{
@@ -390,11 +157,6 @@ pub const Shell = struct {
         // defer logz.deinit();
 
         const stdin = std.io.getStdIn();
-        const stdin_fd = stdin.handle;
-
-        const orig_termios = posix.tcgetattr(stdin_fd) catch @panic("Cannot access termios");
-        var prog_termios: posix.termios = undefined;
-        prog_termios = orig_termios;
 
         const historyArrayList = ArrayList([]u8).init(allocator);
         // errdefer {
@@ -404,19 +166,14 @@ pub const Shell = struct {
         const config = allocator.create(ShellConfig) catch @panic("OOM");
         config.* = ShellConfig{
             .set = false,
-            .frame_size = Position{
-                .x = 0,
-                .y = 0,
-            },
         };
+
+        const frontend = terminal.frontend();
 
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
             .allocator = allocator,
             .stdin = stdin,
-            .stdin_fd = &stdin_fd,
-            .orig_termios = orig_termios,
-            .prog_termios = &prog_termios,
             .history = historyArrayList,
             .history_curr = 0,
             .logger = logger,
@@ -427,9 +184,8 @@ pub const Shell = struct {
             },
             .curr_read = undefined,
             .config = config,
+            .frontend = frontend,
         };
-
-        try self.enableRawMode();
 
         self.initConfig();
 
@@ -451,17 +207,12 @@ pub const Shell = struct {
             @panic("Initial config is set already. Unexpect to set again.");
         }
         self.config.set = true;
-
-        const stdout = std.io.getStdOut();
-        const frameSize = self.getFrameSize(stdout) catch unreachable;
-        self.config.frame_size = frameSize;
     }
 
     fn deinit(self: *Shell) void {
         // NOTE: Intel macOS does not require free the config memory.
         // Align the behaviour later.
         self.allocator.destroy(self.config);
-        self.*.disableRawMode() catch @panic("deinit failed");
     }
 
     fn rep(self: *Shell) !void {
@@ -471,7 +222,7 @@ pub const Shell = struct {
         const read_result = try self.*.read(current_gpa_allocator);
 
         try self.*.eval(self.curr_read.ast_root);
-        try self.*.print(read_result);
+        // try self.*.print(read_result);
 
         current_gpa_allocator.free(read_result);
     }
@@ -484,15 +235,16 @@ pub const Shell = struct {
         //
         // The display one need to address byte-by-byte such that user can
         // have WYSIWYG.
-        const stdout = std.io.getStdOut();
-        const stdout_file = stdout.writer();
-        try stdout_file.writeAll("\nuser> ");
+
+        try self.frontend.print("\nuser> ");
 
         var arrayList = ArrayList(u8).init(allocator);
         errdefer {
             arrayList.deinit();
         }
 
+        // TODO: Some mechanism to get the frontend input(generic way)
+        // for parsing
         const stdin = self.*.stdin;
         const reader = stdin.reader();
         var reading = true;
@@ -520,7 +272,7 @@ pub const Shell = struct {
                                 continue;
                             }
 
-                            try backspace(stdout, &arrayList, self.buffer_pos);
+                            try self.frontend.deleteBackwardChar(&arrayList, self.buffer_pos);
                             if (self.buffer_pos > 0) {
                                 self.buffer_pos -= 1;
                             }
@@ -530,8 +282,8 @@ pub const Shell = struct {
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
-                            try appendByte(stdout, null, '\n', self.buffer_pos);
-                            try backspace(stdout, null, self.buffer_pos);
+                            try self.frontend.insert(null, '\n', self.buffer_pos);
+                            try self.frontend.deleteBackwardChar(null, self.buffer_pos);
                             reading = false;
 
                             if (statement.len == 0) {
@@ -558,7 +310,7 @@ pub const Shell = struct {
                             // navigating function run before.
                             if (key == .N or key == .P) {
                                 if (arrayList.items.len != 0) {
-                                    try self.*.clearLine(stdout, &arrayList);
+                                    try self.*.clearLine(&arrayList);
                                 }
 
                                 const history_len = self.*.history.items.len;
@@ -578,7 +330,7 @@ pub const Shell = struct {
                                 self.buffer_pos = 0;
                                 const result = self.*.getHistoryItem(self.*.history_curr);
                                 for (result) |byte| {
-                                    try appendByte(stdout, &arrayList, byte, self.buffer_pos);
+                                    try self.frontend.insert(&arrayList, byte, self.buffer_pos);
                                     self.buffer_pos += 1;
                                 }
 
@@ -595,7 +347,7 @@ pub const Shell = struct {
                             }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                try appendByte(stdout, &arrayList, byte, self.buffer_pos);
+                                try self.frontend.insert(&arrayList, byte, self.buffer_pos);
                                 self.buffer_pos += 1;
                             }
                         }
@@ -604,9 +356,31 @@ pub const Shell = struct {
                         // NOTE: Restrict for left and right only. No function
                         // yet on buffer.
                         if (key == .ArrowLeft) {
-                            try self.moveLeft(stdout);
+                            if (self.buffer_pos > 0) {
+                                try self.frontend.move(1, .Left);
+
+                                self.buffer_pos -= 1;
+
+                                const cursor = try self.frontend.readCursorPos();
+                                self.buffer_cursor = cursor;
+                            }
                         } else if (key == .ArrowRight) {
-                            try self.moveRight(stdout, arrayList);
+                            if (self.buffer_pos < arrayList.items.len) {
+                                const prevCursor = try self.frontend.readCursorPos();
+
+                                if (prevCursor.x == self.frontend.frame_size.x) {
+                                    // Handle the case when cursor is at the end of window
+                                    try self.frontend.move(prevCursor.x - 1, .Left);
+                                    try self.frontend.move(1, .Down);
+                                } else {
+                                    try self.frontend.move(1, .Right);
+                                }
+
+                                self.buffer_pos += 1;
+
+                                const cursor = try self.frontend.readCursorPos();
+                                self.buffer_cursor = cursor;
+                            }
                         }
                     },
                 }
@@ -626,17 +400,16 @@ pub const Shell = struct {
         return self.history.items[index];
     }
 
-    fn clearLine(self: *Shell, stdout: std.fs.File, arrayList: *ArrayList(u8)) !void {
+    fn clearLine(self: *Shell, arrayList: *ArrayList(u8)) !void {
         // TODO: Provide efficient way for this one
         for (0..arrayList.items.len) |_| {
-            try backspace(stdout, arrayList, self.buffer_pos);
+            try self.frontend.deleteBackwardChar(arrayList, self.buffer_pos);
 
             self.buffer_pos -= 1;
         }
     }
 
     fn eval(self: *Shell, item: MalType) !void {
-        _ = self;
         switch (item) {
             .list => |list| {
                 // NOTE: Check if the first item is a symbol,
@@ -648,11 +421,8 @@ pub const Shell = struct {
                     .symbol => |symbol| {
                         if (data.EVAL_TABLE.get(symbol)) |func| {
                             const fnValue: MalType = try @call(.auto, func, .{params});
-                            // TODO: Wrap this in Terminal struct
-                            const stdout = std.io.getStdOut();
-                            const stdout_file = stdout.writer();
-                            try stdout_file.writeAll(printer.pr_str(fnValue, true));
-                            try stdout_file.writeAll("\n");
+                            try self.frontend.print(printer.pr_str(fnValue, true));
+                            try self.frontend.print("\n");
                         } else {
                             utils.log("SYMBOL", "Not implemented");
                         }
@@ -664,18 +434,8 @@ pub const Shell = struct {
         }
     }
 
-    fn print(self: *Shell, string: []const u8) !void {
-        _ = self;
-        const stdout_file = std.io.getStdOut().writer();
-        var bw = std.io.bufferedWriter(stdout_file);
-        const stdout = bw.writer();
-
-        try stdout.print("{s}", .{string});
-
-        try bw.flush(); // don't forget to flush
-    }
-
     pub fn quit(self: *Shell) void {
+        self.*.frontend.deinit();
         self.*.deinit();
         std.process.exit(0);
     }
