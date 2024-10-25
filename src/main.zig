@@ -12,8 +12,11 @@ const printer = @import("printer.zig");
 const data = @import("data.zig");
 
 const ArrayList = std.ArrayList;
+const Reader = token_reader.Reader;
 const MalType = token_reader.MalType;
 const MalTypeError = token_reader.MalTypeError;
+
+const LispEnv = @import("env.zig").LispEnv;
 
 const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
@@ -128,6 +131,8 @@ pub const Shell = struct {
     config: *ShellConfig,
     /// Frontend of the shell
     frontend: Frontend,
+    /// Lisp environment of the shell,
+    env: *LispEnv,
 
     // As (logz) logger is not thread-safe, using a pool for the use
     // of the logger.
@@ -171,6 +176,8 @@ pub const Shell = struct {
 
         const frontend = terminal.frontend();
 
+        const env = LispEnv.init(allocator);
+
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
             .allocator = allocator,
@@ -186,6 +193,7 @@ pub const Shell = struct {
             .curr_read = undefined,
             .config = config,
             .frontend = frontend,
+            .env = env,
         };
 
         self.initConfig();
@@ -411,7 +419,7 @@ pub const Shell = struct {
     }
 
     fn eval(self: *Shell, item: MalType) !void {
-        const fnValue = token_reader.apply(item) catch |err| switch (err) {
+        const fnValue = self.env.apply(item) catch |err| switch (err) {
             // Silently suppress the error
             MalTypeError.IllegalType => return,
             else => return err,
@@ -438,10 +446,55 @@ pub const Shell = struct {
     }
 };
 
+const testing = std.testing;
+
 test {
     var leaking_gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const leaking_allocator = leaking_gpa.allocator();
     try logz.setup(leaking_allocator, .{ .pool_size = 5, .level = .None });
 
     std.testing.refAllDecls(@This());
+}
+
+test "Shell" {
+    const allocator = testing.allocator;
+    const env = LispEnv.init(allocator);
+    defer env.deinit();
+
+    // Test for parsing string to Lisp result.
+    // apply function cases
+    // TODO: This part should be in Shell, it requires testing frontend
+    // for such case
+    {
+        // List cases
+        var l1 = Reader.init(allocator, "(+ 1 2 3)");
+        defer l1.deinit();
+
+        try testing.expect(l1.ast_root == .list);
+
+        const l1_value = try env.apply(l1.ast_root);
+        const l1_value_number = l1_value.as_number() catch unreachable;
+        try testing.expectEqual(6, l1_value_number.value);
+
+        // List within list cases
+        var l2 = Reader.init(allocator, "(+ 1 (+ 2 3))");
+        defer l2.deinit();
+
+        try testing.expect(l2.ast_root == .list);
+
+        const l2_value = try env.apply(l2.ast_root);
+        const l2_value_number = l2_value.as_number() catch unreachable;
+        try testing.expectEqual(6, l2_value_number.value);
+
+        // Unexpected non-symbol case.
+        // TODO: This may be changed if list type for non-symbol first item is implemented.
+        var ns1 = Reader.init(allocator, "(1 2)");
+        defer ns1.deinit();
+
+        try testing.expect(ns1.ast_root == .list);
+
+        if (env.apply(ns1.ast_root)) |_| {} else |err| {
+            try testing.expectEqual(MalTypeError.IllegalType, err);
+        }
+    }
 }
