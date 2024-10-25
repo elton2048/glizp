@@ -61,6 +61,7 @@ pub const CharKey = enum(u8) {
     Quote = 0x27,
     BracketLeft = 0x28,
     BracketRight = 0x29,
+    Asterisk = 0x2a,
     Plus = 0x2b,
     Dash = 0x2d,
     Dot = 0x2e,
