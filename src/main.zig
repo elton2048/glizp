@@ -497,4 +497,26 @@ test "Shell" {
             try testing.expectEqual(MalTypeError.IllegalType, err);
         }
     }
+
+    // def case in environment
+    {
+        var def1 = Reader.init(allocator, "(def! a 1)");
+        defer def1.deinit();
+
+        try testing.expect(def1.ast_root == .list);
+
+        const def1_value = try env.apply(def1.ast_root);
+        const def1_value_number = def1_value.as_number() catch unreachable;
+        try testing.expectEqual(1, def1_value_number.value);
+
+        // def case with list eval
+        var def2 = Reader.init(allocator, "(def! a (+ 2 1))");
+        defer def2.deinit();
+
+        try testing.expect(def2.ast_root == .list);
+
+        const def2_value = try env.apply(def2.ast_root);
+        const def2_value_number = def2_value.as_number() catch unreachable;
+        try testing.expectEqual(3, def2_value_number.value);
+    }
 }
