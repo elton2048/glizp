@@ -6,6 +6,11 @@ const data = @import("data.zig");
 const utils = @import("utils.zig");
 const iterator = @import("iterator.zig");
 
+const lisp = @import("types/lisp.zig");
+const List = lisp.List;
+const MalType = lisp.MalType;
+const MalTypeError = lisp.MalTypeError;
+
 const StringIterator = iterator.StringIterator;
 
 const ArrayList = std.ArrayList;
@@ -29,103 +34,7 @@ fn isDigit(char: u8) bool {
     return char >= '0' and char <= '9';
 }
 
-pub const MalTypeError = error{
-    Unhandled,
-    IllegalType,
-};
-
 const LispEnv = @import("env.zig").LispEnv;
-
-pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
-
-pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
-
-pub const GenericLispFunction = union(enum) {
-    simple: LispFunction,
-    with_env: LispFunctionWithEnv,
-};
-
-pub const Number = struct {
-    // TODO: Support for floating point
-    value: u64,
-};
-
-pub const List = ArrayList(MalType);
-
-pub const MalType = union(enum) {
-    boolean: bool,
-    number: Number,
-    /// An array which is ordered sequence of characters. The basic way
-    /// to create is by using double quotes.
-    string: ArrayList(u8),
-    list: List,
-    /// General symbol type including function
-    symbol: []const u8,
-
-    SExprEnd,
-    /// Incompleted type from parser
-    Incompleted,
-
-    pub fn deinit(self: MalType) void {
-        switch (self) {
-            .string => |string| {
-                string.deinit();
-            },
-            .list => |list| {
-                for (list.items) |item| {
-                    item.deinit();
-                }
-                list.deinit();
-            },
-            else => {},
-        }
-    }
-
-    pub fn as_symbol(self: MalType) MalTypeError![]const u8 {
-        switch (self) {
-            .symbol => |symbol| {
-                return symbol;
-            },
-            else => return MalTypeError.IllegalType,
-        }
-    }
-
-    pub fn as_boolean(self: MalType) MalTypeError!bool {
-        switch (self) {
-            .boolean => |boolean| {
-                return boolean;
-            },
-            else => return MalTypeError.IllegalType,
-        }
-    }
-
-    pub fn as_number(self: MalType) MalTypeError!Number {
-        switch (self) {
-            .number => |num| {
-                return num;
-            },
-            else => return MalTypeError.IllegalType,
-        }
-    }
-
-    pub fn as_string(self: MalType) MalTypeError!ArrayList(u8) {
-        switch (self) {
-            .string => |str| {
-                return str;
-            },
-            else => return MalTypeError.IllegalType,
-        }
-    }
-
-    pub fn as_list(self: MalType) MalTypeError!ArrayList(MalType) {
-        switch (self) {
-            .list => |list| {
-                return list;
-            },
-            else => return MalTypeError.IllegalType,
-        }
-    }
-};
 
 // NOTE: Currently the regex requires fix to allow repeater after pipe('|')
 // char. Check isByteClass method in the library.
