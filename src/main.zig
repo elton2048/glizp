@@ -176,7 +176,7 @@ pub const Shell = struct {
 
         const frontend = terminal.frontend();
 
-        const env = LispEnv.init(allocator);
+        const env = LispEnv.init_root(allocator);
 
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
@@ -458,7 +458,7 @@ test {
 
 test "Shell" {
     const allocator = testing.allocator;
-    const env = LispEnv.init(allocator);
+    const env = LispEnv.init_root(allocator);
     defer env.deinit();
 
     // Test for parsing string to Lisp result.
@@ -518,5 +518,27 @@ test "Shell" {
         const def2_value = try env.apply(def2.ast_root);
         const def2_value_number = def2_value.as_number() catch unreachable;
         try testing.expectEqual(3, def2_value_number.value);
+    }
+
+    // let* case in environment
+    {
+        var letx1 = Reader.init(allocator, "(let* ((a 2)) (+ a 3))");
+        defer letx1.deinit();
+
+        try testing.expect(letx1.ast_root == .list);
+
+        const letx1_value = try env.apply(letx1.ast_root);
+        const letx1_value_number = letx1_value.as_number() catch unreachable;
+        try testing.expectEqual(5, letx1_value_number.value);
+
+        // multiple let* case
+        var letx2 = Reader.init(allocator, "(let* ((a 2)) (let* ((b 3)) (+ a b)))");
+        defer letx2.deinit();
+
+        try testing.expect(letx2.ast_root == .list);
+
+        const letx2_value = try env.apply(letx2.ast_root);
+        const letx2_value_number = letx2_value.as_number() catch unreachable;
+        try testing.expectEqual(5, letx2_value_number.value);
     }
 }

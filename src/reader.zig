@@ -34,7 +34,16 @@ pub const MalTypeError = error{
     IllegalType,
 };
 
+const LispEnv = @import("env.zig").LispEnv;
+
 pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
+
+pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
+
+pub const GenericLispFunction = union(enum) {
+    simple: LispFunction,
+    with_env: LispFunctionWithEnv,
+};
 
 pub const Number = struct {
     // TODO: Support for floating point
