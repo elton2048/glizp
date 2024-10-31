@@ -1,5 +1,6 @@
 const std = @import("std");
 const hash_map = std.hash_map;
+const Allocator = std.mem.Allocator;
 
 const ArrayList = std.ArrayList;
 const HashMap = hash_map.HashMap;
@@ -129,3 +130,42 @@ const MalTypeContext = struct {
 pub fn MalTypeHashMap(comptime V: type) type {
     return HashMap(*MalType, V, MalTypeContext, 80);
 }
+
+pub fn LispHashMap(comptime V: type) type {
+    return struct {
+        hash_map: mal_hash_map,
+        allocator: Allocator,
+
+        const mal_hash_map = MalTypeHashMap(V);
+        const Self = @This();
+
+        pub fn init(allocator: Allocator) LispHashMap(V) {
+            return .{
+                .hash_map = mal_hash_map.init(allocator),
+                .allocator = allocator,
+            };
+        }
+
+        // TODO: Decide whether we need to copy the value and put into
+        // the hash map
+        pub fn put(self: *Self, key: *MalType, value: V) !void {
+            try self.hash_map.put(key, value);
+        }
+
+        pub fn get(self: *Self, key: *MalType) ?V {
+            return self.hash_map.get(key);
+        }
+
+        pub fn deinit(self: *Self) void {
+            var iter = self.hash_map.iterator();
+            while (iter.next()) |entry| {
+                self.allocator.destroy(entry.key_ptr.*);
+                // self.allocator.destroy(entry.value_ptr);
+            }
+
+            self.hash_map.deinit();
+        }
+    };
+}
+
+test "LispHashMap" {}
