@@ -76,7 +76,29 @@ pub fn log(comptime key: []const u8, message: anytype) void {
 }
 
 pub fn log_pointer(ptr: anytype) void {
-    std.debug.print("[POINTER] {*}\n", .{ptr});
+    const address = @returnAddress();
+
+    const info = std.debug.getSelfDebugInfo() catch @panic("Error in getting debug info");
+
+    const module_info = info.getModuleForAddress(address) catch @panic("ERR");
+    // NOTE: This is copied from printSourceAtAddress directly, the signature
+    // is incorrect with unknown reason.
+    const symbol_info = module_info.getSymbolAtAddress(info.allocator, address) catch |err| switch (err) {
+        error.MissingDebugInfo, error.InvalidDebugInfo => @panic("Debug info issue."),
+        else => @panic("Unknown error when getting symbol info."),
+    };
+
+    if (symbol_info.line_info) |line_info| {
+        const file_path = line_info.file_name;
+        const file_line = line_info.line;
+
+        const caller_name = symbol_info.symbol_name;
+        const file_name = std.fs.path.basename(file_path);
+
+        std.debug.print("[POINTER]: {*}; file: {s}:{d}; caller fn: {s}\n", .{ ptr, file_name, file_line, caller_name });
+    } else {
+        std.debug.print("[POINTER]: {*}\n", .{ptr});
+    }
 }
 
 // From official documenation
