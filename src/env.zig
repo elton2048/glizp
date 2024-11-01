@@ -84,11 +84,11 @@ pub const LispEnv = struct {
     outer: ?*LispEnv,
     allocator: std.mem.Allocator,
     data: std.StringHashMap(MalType),
-    fnTable: lisp.MalTypeHashMap(FunctionWithAttributes),
+    fnTable: lisp.LispHashMap(FunctionWithAttributes),
 
     const Self = @This();
 
-    fn readFromStaticMap(baseTable: *lisp.MalTypeHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunction)) void {
+    fn readFromStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunction)) void {
         for (map.keys()) |key| {
             const optional_func = map.get(key);
             if (optional_func) |func| {
@@ -96,7 +96,10 @@ pub const LispEnv = struct {
                     .type = .internal,
                     .func = GenericLispFunction{ .simple = func },
                 };
+
                 const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                defer baseTable.allocator.destroy(lispKey);
+
                 lispKey.* = MalType{
                     .symbol = key,
                 };
@@ -106,7 +109,7 @@ pub const LispEnv = struct {
         }
     }
 
-    fn readFromEnvStaticMap(baseTable: *lisp.MalTypeHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunctionWithEnv)) void {
+    fn readFromEnvStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunctionWithEnv)) void {
         for (map.keys()) |key| {
             const optional_func = map.get(key);
             if (optional_func) |func| {
@@ -114,7 +117,10 @@ pub const LispEnv = struct {
                     .type = .internal,
                     .func = GenericLispFunction{ .with_env = func },
                 };
+
                 const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                defer baseTable.allocator.destroy(lispKey);
+
                 lispKey.* = MalType{
                     .symbol = key,
                 };
@@ -126,10 +132,6 @@ pub const LispEnv = struct {
 
     pub fn deinit(self: *Self) void {
         self.data.deinit();
-        var fnTableIter = self.fnTable.iterator();
-        while (fnTableIter.next()) |func| {
-            self.fnTable.allocator.destroy(func.key_ptr.*);
-        }
         self.fnTable.deinit();
         self.allocator.destroy(self);
     }
@@ -138,9 +140,10 @@ pub const LispEnv = struct {
         const self = allocator.create(Self) catch @panic("OOM");
 
         const envData = std.StringHashMap(MalType).init(allocator);
+
         // Expected to modify the pointer through function to setup
         // initial function table.
-        const fnTable = @constCast(&lisp.MalTypeHashMap(FunctionWithAttributes).init(allocator));
+        const fnTable = @constCast(&lisp.LispHashMap(FunctionWithAttributes).init(allocator));
         readFromStaticMap(fnTable, data.EVAL_TABLE);
         readFromEnvStaticMap(fnTable, SPECIAL_ENV_EVAL_TABLE);
 
@@ -163,7 +166,7 @@ pub const LispEnv = struct {
 
         const envData = std.StringHashMap(MalType).init(allocator);
 
-        const fnTable = lisp.MalTypeHashMap(FunctionWithAttributes).init(allocator);
+        const fnTable = lisp.LispHashMap(FunctionWithAttributes).init(allocator);
 
         self.* = Self{
             .outer = outer,
@@ -176,7 +179,7 @@ pub const LispEnv = struct {
     }
 
     fn logFnTable(self: *Self) void {
-        var newfnTableIter = self.fnTable.keyIterator();
+        var newfnTableIter = self.fnTable.hash_map.keyIterator();
         while (newfnTableIter.next()) |key| {
             const symbol = key.*.as_symbol() catch @panic("Unexpected non-symbol key value");
 
@@ -189,6 +192,7 @@ pub const LispEnv = struct {
 
     pub fn addFn(self: *Self, key: []const u8, value: LispFunction) !void {
         const lispKey = try self.allocator.create(MalType);
+        defer self.allocator.destroy(lispKey);
         lispKey.* = MalType{
             .symbol = key,
         };
@@ -202,6 +206,7 @@ pub const LispEnv = struct {
 
     pub fn addFnWithEnv(self: *Self, key: []const u8, value: LispFunctionWithEnv) !void {
         const lispKey = try self.allocator.create(MalType);
+        defer self.allocator.destroy(lispKey);
         lispKey.* = MalType{
             .symbol = key,
         };

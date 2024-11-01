@@ -133,23 +133,30 @@ pub fn MalTypeHashMap(comptime V: type) type {
 
 pub fn LispHashMap(comptime V: type) type {
     return struct {
-        hash_map: mal_hash_map,
+        hash_map: GenericMalHashMap,
         allocator: Allocator,
 
-        const mal_hash_map = MalTypeHashMap(V);
+        const GenericMalHashMap = MalTypeHashMap(V);
         const Self = @This();
 
         pub fn init(allocator: Allocator) LispHashMap(V) {
             return .{
-                .hash_map = mal_hash_map.init(allocator),
+                .hash_map = GenericMalHashMap.init(allocator),
                 .allocator = allocator,
             };
         }
 
-        // TODO: Decide whether we need to copy the value and put into
-        // the hash map
+        /// Put the `key` and `value` in the hash map, where the key
+        /// is copied. The memory ownership is transfered (and thus
+        /// that could be destroyed right away).
+        /// This tries to match the best practice to defer destroy the
+        /// instance created within the same scope to make sure no memory
+        /// leakage.
         pub fn put(self: *Self, key: *MalType, value: V) !void {
-            try self.hash_map.put(key, value);
+            const key_copy = try self.allocator.create(@TypeOf(key.*));
+            key_copy.* = key.*;
+
+            try self.hash_map.put(key_copy, value);
         }
 
         pub fn get(self: *Self, key: *MalType) ?V {
@@ -159,6 +166,7 @@ pub fn LispHashMap(comptime V: type) type {
         pub fn deinit(self: *Self) void {
             var iter = self.hash_map.iterator();
             while (iter.next()) |entry| {
+                // The key is owned by hash_map
                 self.allocator.destroy(entry.key_ptr.*);
                 // self.allocator.destroy(entry.value_ptr);
             }
@@ -168,4 +176,23 @@ pub fn LispHashMap(comptime V: type) type {
     };
 }
 
-test "LispHashMap" {}
+const testing = std.testing;
+
+test "LispHashMap" {
+    const allocator = std.testing.allocator;
+
+    var lispHashMap = LispHashMap([]const u8).init(allocator);
+    defer lispHashMap.deinit();
+
+    const key1 = allocator.create(MalType) catch @panic("OOM");
+    defer allocator.destroy(key1);
+    key1.* = MalType{ .symbol = "test1" };
+
+    const value1 = "value1";
+    lispHashMap.put(key1, value1) catch @panic("Unexpected error in putting value in LispHashMap.");
+
+    const value1_optional_result = lispHashMap.get(key1);
+    if (value1_optional_result) |value| {
+        try testing.expectEqual(value, "value1");
+    }
+}
