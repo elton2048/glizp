@@ -10,7 +10,6 @@ const StringIterator = iterator.StringIterator;
 
 const ArrayList = std.ArrayList;
 const debug = std.debug;
-const mem = std.mem;
 
 const BOOLEAN_MAP = @import("semantic.zig").BOOLEAN_MAP;
 
@@ -35,7 +34,16 @@ pub const MalTypeError = error{
     IllegalType,
 };
 
+const LispEnv = @import("env.zig").LispEnv;
+
 pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
+
+pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
+
+pub const GenericLispFunction = union(enum) {
+    simple: LispFunction,
+    with_env: LispFunctionWithEnv,
+};
 
 pub const Number = struct {
     // TODO: Support for floating point
@@ -43,71 +51,6 @@ pub const Number = struct {
 };
 
 pub const List = ArrayList(MalType);
-
-/// apply function execute the function when the Lisp Object is in list
-/// type and the first item is in symbol.
-/// It checks if all the params on the layer needs further apply first,
-/// return the result to be the param.
-/// e.g. For (+ 1 2 (+ 2 3))
-/// -> (+ 1 2 5) ;; Eval (+ 2 3) in recursion
-/// -> 8
-/// TODO: Consider if continuous apply is suitable, possible and more scalable
-/// e.g. For (+ 1 2 (+ 2 3))
-/// -> (+ 3 (+ 2 3))         ;; Hit (+ 1 2), call add function with accum = 1 and param = 2
-/// -> (+ 3 5)               ;; Hit the list (+2 3); Eval (+ 2 3), perhaps in new thread?
-/// -> 8
-pub fn apply(mal: MalType) !MalType {
-    var fnName: []const u8 = undefined;
-    var mal_param: MalType = undefined;
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-
-    var params = ArrayList(MalType).init(allocator);
-
-    defer {
-        params.deinit();
-        const check = gpa.deinit();
-        std.debug.assert(check == .ok);
-    }
-
-    const list = try mal.as_list();
-    for (list.items, 0..) |_mal, i| {
-        if (i == 0) {
-            fnName = _mal.as_symbol() catch |err| switch (err) {
-                MalTypeError.IllegalType => {
-                    utils.log("ERROR", "Invalid symbol type to apply");
-                    return err;
-                },
-                else => {
-                    utils.log("ERROR", "Unhandled error");
-                    return err;
-                },
-            };
-            continue;
-        }
-
-        if (_mal.as_list()) |_| {
-            // TODO: Need more assertion
-            // Assume the return type fits with the function
-            mal_param = try apply(_mal);
-            if (mal_param == .Incompleted) {
-                return MalTypeError.IllegalType;
-            }
-        } else |_| {
-            mal_param = _mal;
-        }
-        try params.append(mal_param);
-    }
-    // TODO: Direct couple to the dependency (EVAL_TABLE) now
-    if (data.EVAL_TABLE.get(fnName)) |func| {
-        const fnValue: MalType = try @call(.auto, func, .{params.items});
-        return fnValue;
-    } else {
-        utils.log("SYMBOL", "Not implemented");
-    }
-
-    return .Incompleted;
-}
 
 pub const MalType = union(enum) {
     boolean: bool,
@@ -535,41 +478,6 @@ test "Reader" {
         try testing.expect(sub_list2.items[0] == .number);
         const sub_list2_val = sub_list2.items[0].as_number() catch unreachable;
         try testing.expectEqual(2, sub_list2_val.value);
-    }
-
-    // apply function cases
-    // NOTE: Depends on EVAL_TABLE
-    {
-        // List cases
-        var l1 = Reader.init(allocator, "(+ 1 2 3)");
-        defer l1.deinit();
-
-        try testing.expect(l1.ast_root == .list);
-
-        const l1_value = try apply(l1.ast_root);
-        const l1_value_number = l1_value.as_number() catch unreachable;
-        try testing.expectEqual(6, l1_value_number.value);
-
-        // List within list cases
-        var l2 = Reader.init(allocator, "(+ 1 (+ 2 3))");
-        defer l2.deinit();
-
-        try testing.expect(l2.ast_root == .list);
-
-        const l2_value = try apply(l2.ast_root);
-        const l2_value_number = l2_value.as_number() catch unreachable;
-        try testing.expectEqual(6, l2_value_number.value);
-
-        // Unexpected non-symbol case.
-        // TODO: This may be changed if list type for non-symbol first item is implemented.
-        var ns1 = Reader.init(allocator, "(1 2)");
-        defer ns1.deinit();
-
-        try testing.expect(ns1.ast_root == .list);
-
-        if (apply(ns1.ast_root)) |_| {} else |err| {
-            try testing.expectEqual(MalTypeError.IllegalType, err);
-        }
     }
 
     // Incompleted cases

@@ -56,6 +56,7 @@ pub const CharKey = enum(u8) {
     // TODO: How to handle characters with shift? Should they be mapped
     // into explicit character?
     Space = 0x20,
+    ExclamationMark = 0x21,
     DoubleQuote = 0x22,
 
     Quote = 0x27,
