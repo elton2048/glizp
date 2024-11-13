@@ -26,6 +26,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // According to MAL, not in Emacs env
     .{ "def!", &set },
     .{ "let*", &letX },
+    .{ "if", &ifFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -78,6 +79,32 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     }
 
     return newEnv.apply(eval_arg);
+}
+
+fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const condition_arg = params[0];
+    const statement_true = params[1];
+    // NOTE: In elisp the last params corresponds to false case,
+    // it is not the case right now.
+    // i.e. (if (= 1 2) 1 2 3 4) => 4
+    var statement_false: MalType = undefined;
+
+    if (params.len == 1) {
+        // TODO: Better error type
+        return MalTypeError.IllegalType;
+    }
+
+    if (params.len == 2) {
+        statement_false = MalType{ .boolean = false };
+    } else {
+        statement_false = params[2];
+    }
+
+    const condition = (try env.apply(condition_arg)).as_boolean() catch true;
+    if (!condition) {
+        return env.apply(statement_false);
+    }
+    return env.apply(statement_true);
 }
 
 pub const LispEnv = struct {

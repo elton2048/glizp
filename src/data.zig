@@ -12,6 +12,8 @@ pub const EVAL_TABLE = std.StaticStringMap(LispFunction).initComptime(.{
     .{ "-", &minus },
     .{ "*", &times },
     .{ "/", &quo },
+    // TODO: In Emacs it uses general arithcompare_driver function
+    .{ "=", &eqlsign },
 });
 
 const ARITHMETIC_OPERATION = enum {
@@ -20,6 +22,18 @@ const ARITHMETIC_OPERATION = enum {
     sub,
     div,
 };
+
+fn eqlsign(params: []MalType) MalTypeError!MalType {
+    // TODO: support compare number only
+    const first = try params[0].as_number();
+    for (params) |param| {
+        const value = try param.as_number();
+        if (first.value != value.value) {
+            return MalType{ .boolean = false };
+        }
+    }
+    return MalType{ .boolean = true };
+}
 
 /// Refer to Emacs original comment
 /// Return the result of applying the arithmetic operation CODE to the
@@ -113,6 +127,8 @@ test "data - arith" {
     const param3 = [_]MalType{ num3, num2 };
     const param4 = [_]MalType{ num4, num2 };
     const param4_0 = [_]MalType{ num4, num0 };
+    const param0_same = [_]MalType{ num0, num0 };
+    const param0_same_multiple = [_]MalType{ num0, num0, num0 };
 
     const plus1 = try plus(@constCast(&param1));
     try expectEqual(3, (try plus1.as_number()).value);
@@ -137,4 +153,13 @@ test "data - arith" {
     if (quo(@constCast(&param4_0))) |_| unreachable else |err| {
         try (std.testing.expectEqual(MalTypeError.Unhandled, err));
     }
+
+    const eqlsign_equal = try eqlsign(@constCast(&param0_same));
+    try expectEqual(true, try eqlsign_equal.as_boolean());
+
+    const eqlsign_equal_multiple = try eqlsign(@constCast(&param0_same_multiple));
+    try expectEqual(true, try eqlsign_equal_multiple.as_boolean());
+
+    const eqlsign_unequal = try eqlsign(@constCast(&param1));
+    try expectEqual(false, try eqlsign_unequal.as_boolean());
 }

@@ -542,4 +542,52 @@ test "Shell" {
         const letx2_value_number = letx2_value.as_number() catch unreachable;
         try testing.expectEqual(5, letx2_value_number.value);
     }
+
+    // if case in environment
+    {
+        var if1 = Reader.init(allocator, "(if (= 2 2) (+ 1 1) (+ 1 0))");
+        defer if1.deinit();
+
+        try testing.expect(if1.ast_root == .list);
+
+        const if1_value = try env.apply(if1.ast_root);
+        const if1_value_number = if1_value.as_number() catch unreachable;
+        try testing.expectEqual(2, if1_value_number.value);
+
+        var if2 = Reader.init(allocator, "(if (= 2 1) (+ 1 1) (+ 1 0))");
+        defer if2.deinit();
+
+        try testing.expect(if2.ast_root == .list);
+
+        const if2_value = try env.apply(if2.ast_root);
+        const if2_value_number = if2_value.as_number() catch unreachable;
+        try testing.expectEqual(1, if2_value_number.value);
+
+        var if_incompleted_1 = Reader.init(allocator, "(if (= 2 2) 1)");
+        defer if_incompleted_1.deinit();
+
+        try testing.expect(if_incompleted_1.ast_root == .list);
+
+        const if_incompleted_1_value = try env.apply(if_incompleted_1.ast_root);
+        const if_incompleted_1_value_number = if_incompleted_1_value.as_number() catch unreachable;
+        try testing.expectEqual(1, if_incompleted_1_value_number.value);
+
+        var if_incompleted_2 = Reader.init(allocator, "(if (= 1 2) 1)");
+        defer if_incompleted_2.deinit();
+
+        try testing.expect(if_incompleted_2.ast_root == .list);
+
+        const if_incompleted_2_value = try env.apply(if_incompleted_2.ast_root);
+        const if_incompleted_2_value_bool = if_incompleted_2_value.as_boolean() catch unreachable;
+        try testing.expectEqual(false, if_incompleted_2_value_bool);
+
+        var if_non_bool = Reader.init(allocator, "(if 1 (+ 1 1) (+ 1 0))");
+        defer if_non_bool.deinit();
+
+        try testing.expect(if_non_bool.ast_root == .list);
+
+        const if_non_bool_value = try env.apply(if_non_bool.ast_root);
+        const if_non_bool_value_number = if_non_bool_value.as_number() catch unreachable;
+        try testing.expectEqual(2, if_non_bool_value_number.value);
+    }
 }
