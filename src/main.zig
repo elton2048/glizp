@@ -590,4 +590,23 @@ test "Shell" {
         const if_non_bool_value_number = if_non_bool_value.as_number() catch unreachable;
         try testing.expectEqual(2, if_non_bool_value_number.value);
     }
+
+    // lambda case in environment
+    {
+        // Using wrap to call lambda function shall consider one of the
+        // special case now as it breaks the normal rule to eval list.
+        // In Emacs using funcall to supply params is a more standard way
+        // in lisp semantic.
+        // i.e. (funcall (lambda (a b) (+ 1 a b)) a b)
+        //       ^       ^----------------------^ ^ ^
+        // function call   The function part      params
+        var wrapped_lambda1 = Reader.init(allocator, "((lambda (a) (+ 1 a)) 2)");
+        defer wrapped_lambda1.deinit();
+
+        try testing.expect(wrapped_lambda1.ast_root == .list);
+
+        const lambda1_value = try env.apply(wrapped_lambda1.ast_root);
+        const lambda1_value_number = lambda1_value.as_number() catch unreachable;
+        try testing.expectEqual(3, lambda1_value_number.value);
+    }
 }

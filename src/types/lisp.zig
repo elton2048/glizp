@@ -35,8 +35,10 @@ pub const MalType = union(enum) {
     /// to create is by using double quotes.
     string: ArrayList(u8),
     list: List,
-    /// General symbol type including function
+    /// General symbol type including function keyword
     symbol: []const u8,
+
+    function: LispFunction,
 
     SExprEnd,
     /// Incompleted type from parser
@@ -97,6 +99,15 @@ pub const MalType = union(enum) {
         switch (self) {
             .list => |list| {
                 return list;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_function(self: MalType) MalTypeError!LispFunction {
+        switch (self) {
+            .function => |func| {
+                return func;
             },
             else => return MalTypeError.IllegalType,
         }

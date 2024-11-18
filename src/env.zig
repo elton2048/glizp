@@ -27,6 +27,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "def!", &set },
     .{ "let*", &letX },
     .{ "if", &ifFunc },
+    .{ "lambda", &lambdaFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -73,6 +74,7 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     defer newEnv.deinit();
 
     for (bindings.items) |binding| {
+        // NOTE: Using list for binding
         const list = try binding.as_list();
 
         _ = try set(list.items, newEnv);
@@ -105,6 +107,32 @@ fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         return env.apply(statement_false);
     }
     return env.apply(statement_true);
+}
+
+// TODO
+fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const Lambda = struct {
+        params: []MalType,
+        pub fn func(inner_params: []MalType) MalTypeError!MalType {
+            // _ = inner_params;
+            utils.log("LOG", inner_params[0]);
+
+            return MalType{ .boolean = false };
+        }
+    };
+
+    const newEnv = LispEnv.init(env.allocator, env);
+    defer newEnv.deinit();
+    // _ = params;
+    // _ = env;
+    const fn_params = try params[0].as_list();
+    for (fn_params.items) |param| {
+        const symbol = try param.as_symbol();
+
+        _ = symbol;
+    }
+
+    return MalType{ .function = &Lambda.func };
 }
 
 pub const LispEnv = struct {
@@ -294,6 +322,9 @@ pub const LispEnv = struct {
             .symbol => |symbol| {
                 return self.getVar(symbol);
             },
+            // .function => |func| {
+            //     // TODO: Shall return function symbol in print function
+            // },
             else => return mal,
         }
     }
@@ -313,6 +344,7 @@ pub const LispEnv = struct {
     /// -> 8
     fn applyList(self: *Self, list: ArrayList(MalType)) MalTypeError!MalType {
         var fnName: []const u8 = undefined;
+        var lambda_function_pointer: LispFunction = undefined;
         var mal_param: MalType = undefined;
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
@@ -326,16 +358,28 @@ pub const LispEnv = struct {
 
         for (list.items, 0..) |_mal, i| {
             if (i == 0) {
-                fnName = _mal.as_symbol() catch |err| switch (err) {
-                    MalTypeError.IllegalType => {
-                        utils.log("ERROR", "Invalid symbol type to apply");
-                        return err;
+                utils.log("LOG", _mal);
+                switch (_mal) {
+                    .symbol => |symbol| {
+                        fnName = symbol;
+                    },
+                    .function => |func| {
+                        lambda_function_pointer = func;
+                        // TODO: Stub to by-pass the further eval steps
+                        // and proceed to generate params for the function.
+                        // A more sophisticated way is preferred later
+                        fnName = "";
+                    },
+                    .list => |_list| {
+                        // TODO: Eval one more time to check if it is function to run
+                        utils.log("LOG", _list.items[0]);
+                        // _ = _list;
                     },
                     else => {
-                        utils.log("ERROR", "Unhandled error");
-                        return err;
+                        utils.log("ERROR", "Illegal type to be evaled");
+                        return MalTypeError.IllegalType;
                     },
-                };
+                }
                 continue;
             }
 
@@ -399,6 +443,9 @@ pub const LispEnv = struct {
 
                 return fnValue;
             }
+            // else if (lambda_function_pointer != undefined) {
+            //     return try @call(.auto, lambda_function_pointer, .{params.items});
+            // }
             optional_env = env.outer;
         }
 
