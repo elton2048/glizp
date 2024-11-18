@@ -64,6 +64,9 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
             _ = string.pop();
             string.appendSlice(")") catch @panic("allocator error");
         },
+        .function => |_| {
+            string.appendSlice("#<function>") catch @panic("allocator error");
+        },
         else => {},
     }
 

@@ -589,4 +589,53 @@ test "Shell" {
         const if_non_bool_value_number = if_non_bool_value.as_number() catch unreachable;
         try testing.expectEqual(2, if_non_bool_value_number.value);
     }
+
+    // lambda case in environment
+    {
+        var lambda1 = Reader.init(allocator, "(lambda (a) (+ 1 a))");
+        defer lambda1.deinit();
+
+        try testing.expect(lambda1.ast_root == .list);
+
+        const lambda1_value = try env.apply(lambda1.ast_root);
+        // NOTE: Need manual deinit previously as it the lambda function
+        // does not resolve at all.
+        // This makes the program has the potential leakage issue as
+        // the interrupter may store the function lisp value but never
+        // free.
+        // This is due to the ast_root is in list type, in that layer
+        // the lambda is not evaled but after the apply function, which
+        // makes the normal deinit function does not free the function lisp value.
+        // Current implementation checks if the lambda function run and
+        // defer deinit process.
+
+        try testing.expect(lambda1_value == .function);
+
+        // Using wrap to call lambda function shall consider one of the
+        // special case now as it breaks the normal rule to eval list.
+        // In Emacs using funcall to supply params is a more standard way
+        // in lisp semantic.
+        // i.e. (funcall (lambda (a b) (+ 1 a b)) a b)
+        //       ^       ^----------------------^ ^ ^
+        //  function call   The function part      params
+        //              vv----------------------v v v
+        // Current case ((lambda (a b) (+ 1 a b)) a b)
+        var wrapped_lambda1 = Reader.init(allocator, "((lambda (a) (+ 1 a)) 2)");
+        defer wrapped_lambda1.deinit();
+
+        try testing.expect(wrapped_lambda1.ast_root == .list);
+
+        const wrapped_lambda1_value = try env.apply(wrapped_lambda1.ast_root);
+        const wrapped_lambda1_value_number = wrapped_lambda1_value.as_number() catch unreachable;
+        try testing.expectEqual(3, wrapped_lambda1_value_number.value);
+
+        var wrapped_lambda2 = Reader.init(allocator, "((lambda (a b) (+ 1 a b)) 2 3)");
+        defer wrapped_lambda2.deinit();
+
+        try testing.expect(wrapped_lambda2.ast_root == .list);
+
+        const wrapped_lambda2_value = try env.apply(wrapped_lambda2.ast_root);
+        const wrapped_lambda2_value_number = wrapped_lambda2_value.as_number() catch unreachable;
+        try testing.expectEqual(6, wrapped_lambda2_value_number.value);
+    }
 }

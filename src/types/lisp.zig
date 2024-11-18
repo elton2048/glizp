@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = hash_map.HashMap;
 
+const utils = @import("../utils.zig");
 const LispEnv = @import("../env.zig").LispEnv;
 
 pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
@@ -35,12 +36,16 @@ pub const MalType = union(enum) {
     /// to create is by using double quotes.
     string: ArrayList(u8),
     list: List,
-    /// General symbol type including function
+    /// General symbol type including function keyword
     symbol: []const u8,
+
+    function: *LispEnv,
 
     SExprEnd,
     /// Incompleted type from parser
     Incompleted,
+    /// Undefined param for function
+    Undefined,
 
     pub fn deinit(self: MalType) void {
         switch (self) {
@@ -52,6 +57,9 @@ pub const MalType = union(enum) {
                     item.deinit();
                 }
                 list.deinit();
+            },
+            .function => |func_with_env| {
+                func_with_env.deinit();
             },
             else => {},
         }
@@ -97,6 +105,15 @@ pub const MalType = union(enum) {
         switch (self) {
             .list => |list| {
                 return list;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_function(self: MalType) MalTypeError!*LispEnv {
+        switch (self) {
+            .function => |func| {
+                return func;
             },
             else => return MalTypeError.IllegalType,
         }
