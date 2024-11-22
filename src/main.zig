@@ -593,6 +593,17 @@ test "Shell" {
 
     // lambda case in environment
     {
+        var lambda1 = Reader.init(allocator, "(lambda (a) (+ 1 a))");
+        defer lambda1.deinit();
+
+        try testing.expect(lambda1.ast_root == .list);
+
+        const lambda1_value = try env.apply(lambda1.ast_root);
+        try testing.expect(lambda1_value == .functionUsingEnv);
+
+        // const lambda1_value_number = lambda1_value.as_number() catch unreachable;
+        // try testing.expectEqual(3, lambda1_value_number.value);
+
         // Using wrap to call lambda function shall consider one of the
         // special case now as it breaks the normal rule to eval list.
         // In Emacs using funcall to supply params is a more standard way
@@ -605,8 +616,8 @@ test "Shell" {
 
         try testing.expect(wrapped_lambda1.ast_root == .list);
 
-        const lambda1_value = try env.apply(wrapped_lambda1.ast_root);
-        const lambda1_value_number = lambda1_value.as_number() catch unreachable;
-        try testing.expectEqual(3, lambda1_value_number.value);
+        const wrapped_lambda1_value = try env.apply(wrapped_lambda1.ast_root);
+        const wrapped_lambda1_value_number = wrapped_lambda1_value.as_number() catch unreachable;
+        try testing.expectEqual(3, wrapped_lambda1_value_number.value);
     }
 }

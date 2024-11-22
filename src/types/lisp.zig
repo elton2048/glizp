@@ -16,6 +16,8 @@ pub const GenericLispFunction = union(enum) {
     with_env: LispFunctionWithEnv,
 };
 
+pub const Lambda = @import("../env.zig").Lambda;
+
 pub const List = ArrayList(MalType);
 
 pub const MalTypeError = error{
@@ -38,11 +40,14 @@ pub const MalType = union(enum) {
     /// General symbol type including function keyword
     symbol: []const u8,
 
-    function: LispFunction,
+    function: *Lambda,
+    functionUsingEnv: *LispEnv,
 
     SExprEnd,
     /// Incompleted type from parser
     Incompleted,
+    /// Undefined param for function
+    Undefined,
 
     pub fn deinit(self: MalType) void {
         switch (self) {
@@ -104,9 +109,9 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_function(self: MalType) MalTypeError!LispFunction {
+    pub fn as_function(self: MalType) MalTypeError!*LispEnv {
         switch (self) {
-            .function => |func| {
+            .functionUsingEnv => |func| {
                 return func;
             },
             else => return MalTypeError.IllegalType,

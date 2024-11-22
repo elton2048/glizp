@@ -27,7 +27,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "def!", &set },
     .{ "let*", &letX },
     .{ "if", &ifFunc },
-    .{ "lambda", &lambdaFunc },
+    .{ "lambda", &lambdaFuncUsingEnv },
 });
 
 pub const FunctionType = union(enum) {
@@ -103,36 +103,170 @@ fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     }
 
     const condition = (try env.apply(condition_arg)).as_boolean() catch true;
+    utils.log("IF", "return");
     if (!condition) {
         return env.apply(statement_false);
     }
     return env.apply(statement_true);
 }
 
-// TODO
-fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
-    const Lambda = struct {
-        params: []MalType,
-        pub fn func(inner_params: []MalType) MalTypeError!MalType {
-            // _ = inner_params;
-            utils.log("LOG", inner_params[0]);
+pub const Lambda = struct {
+    allocator: std.mem.Allocator,
+    params: []MalType,
+    // inner_env: *LispEnv,
+    inner_func: *const fn (*Lambda, []MalType, []MalType) MalTypeError!MalType,
+    const Self = @This();
+    // pub fn func(self: Lambda, inner_params: []MalType) MalTypeError!MalType {
+    //     utils.log("INNER FUNC", self.params);
+    //     utils.log("FUNC", inner_params[0]);
+
+    //     return MalType{ .boolean = false };
+    // }
+
+    pub fn init(allocator: std.mem.Allocator, params: []MalType, func: *const fn (*Lambda, []MalType, []MalType) MalTypeError!MalType) *Lambda {
+        const self = allocator.create(Self) catch @panic("OOM");
+
+        self.* = Lambda{
+            .allocator = allocator,
+            .params = params,
+            .inner_func = func,
+        };
+
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.allocator.destroy(self);
+    }
+};
+
+fn lambdaFuncUsingEnv(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const newEnv = LispEnv.init(env.allocator, env);
+    // defer newEnv.deinit();
+
+    const fn_params = try params[0].as_list();
+    for (fn_params.items) |param| {
+        const param_symbol = try param.as_symbol();
+        env.addVar(param_symbol, .Undefined) catch unreachable;
+    }
+
+    const eval_params = try params[1].as_list();
+    utils.log("func", eval_params.items[0]);
+    // env.apply(eval_params);
+    const inner_fn = struct {
+        pub fn func(_params: []MalType) MalTypeError!MalType {
+            utils.log("func with env", _params[0]);
 
             return MalType{ .boolean = false };
         }
-    };
+    }.func;
+
+    // TODO: Align the internal key for the function
+    newEnv.addFn("_", &inner_fn) catch unreachable;
+
+    return MalType{ .functionUsingEnv = newEnv };
+}
+
+// TODO
+fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    utils.log("LAMBDA", "enter");
+    utils.log_pointer(params);
+    utils.log_pointer(env);
+
+    const _params = env.allocator.dupe(MalType, params) catch @panic("Unexpected OOM");
+    utils.log_pointer(_params);
+    // defer env.allocator.free(_params);
+
+    const lambda = Lambda.init(env.allocator, _params, struct {
+        pub fn func(inner_env: *Lambda, outer_params: []MalType, inner_params: []MalType) MalTypeError!MalType {
+            utils.log_pointer(inner_env);
+            utils.log_pointer(inner_env.params);
+            const _fn_params = try inner_env.params[0].as_list();
+            for (_fn_params.items) |param| {
+                const symbol = try param.as_symbol();
+                utils.log("INNER FUNC PARAMS", symbol);
+            }
+
+            const _fn_expression = try inner_env.params[1].as_list();
+            for (_fn_expression.items) |param| {
+                const symbol = try param.as_symbol();
+                utils.log("INNER FUNC EXPRESSION", symbol);
+            }
+
+            // const lambda_params = try self.params.*[0].as_list();
+            const fn_params = try outer_params[0].as_list();
+            for (fn_params.items) |param| {
+                const symbol = try param.as_symbol();
+                utils.log("INNER FUNC", symbol);
+            }
+            // utils.log("INNER FUNC", outer_params[0]);
+            // utils.log("INNER FUNC", self.params.*[0]);
+            utils.log("FUNC", inner_params[0]);
+
+            return MalType{ .boolean = false };
+        }
+    }.func);
+    // TODO: When to deinit the struct pointer?
+    // defer lambda.deinit();
+
+    // lambda.params = @constCast(&_params);
+    // utils.log_pointer(lambda.params);
+    // utils.log("LAMBDA", lambda.params.*[0]);
+
+    // lambda.inner_func = struct {
+    //     pub fn func(outer_params: []MalType, inner_params: []MalType) MalTypeError!MalType {
+    //         // utils.log_pointer(self.params);
+    //         // const lambda_params = try self.params.*[0].as_list();
+    //         const fn_params = try outer_params[0].as_list();
+    //         for (fn_params.items) |param| {
+    //             const symbol = try param.as_symbol();
+    //             utils.log("INNER FUNC", symbol);
+    //         }
+    //         // utils.log("INNER FUNC", outer_params[0]);
+    //         // utils.log("INNER FUNC", self.params.*[0]);
+    //         utils.log("FUNC", inner_params[0]);
+
+    //         return MalType{ .boolean = false };
+    //     }
+    // }.func;
 
     const newEnv = LispEnv.init(env.allocator, env);
     defer newEnv.deinit();
-    // _ = params;
-    // _ = env;
+
     const fn_params = try params[0].as_list();
     for (fn_params.items) |param| {
         const symbol = try param.as_symbol();
-
-        _ = symbol;
+        utils.log("LAMBDA symbol", symbol);
     }
 
-    return MalType{ .function = &Lambda.func };
+    const eval_expression = try params[1].as_list();
+    _ = eval_expression;
+
+    utils.log("LAMBDA", "return");
+    // const _Lambda = struct {
+    //     pub fn internal_func(inner_params: []MalType, outer_env: *LispEnv) MalTypeError!MalType {
+    //         // const inner_env = LispEnv.init(outer_env.allocator, outer_env);
+    //         // defer inner_env.deinit();
+
+    //         utils.log("FUNC", inner_params[0]);
+    //         return letX(inner_params, outer_env);
+    //     }
+
+    //     pub fn func(_inner_env: *LispEnv) LispFunction {
+    //         _ = _inner_env;
+    //         // utils.log("INNER FUNC", inner_env);
+    //         return internal_func;
+    //     }
+    // };
+    // _ = _Lambda;
+
+    // lambda.* = Lambda{
+    //     .inner_env = newEnv,
+    //     .inner_func = &_Lambda.func(newEnv),
+    // };
+    // _ = lambda;
+    return MalType{ .function = lambda };
+    // return MalType{ .function = &_Lambda.internal_func };
 }
 
 pub const LispEnv = struct {
@@ -277,6 +411,13 @@ pub const LispEnv = struct {
         try self.data.put(key, value);
     }
 
+    pub fn setVar(self: *Self, key: []const u8, value: MalType) !void {
+        const var_exists = self.data.get(key);
+        std.debug.assert(var_exists.? == .Undefined);
+
+        try self.data.put(key, value);
+    }
+
     pub fn getVar(self: *Self, key: []const u8) !MalType {
         var optional_env: ?*LispEnv = self;
 
@@ -344,7 +485,9 @@ pub const LispEnv = struct {
     /// -> 8
     fn applyList(self: *Self, list: ArrayList(MalType)) MalTypeError!MalType {
         var fnName: []const u8 = undefined;
-        var lambda_function_pointer: LispFunction = undefined;
+        var lambda_function_pointer: ?*LispEnv = null;
+        // var lambda_function_pointer: ?*const fn (Lambda, []MalType) MalTypeError!MalType = null;
+        // var lambda_function_pointer: ?LispFunctionWithEnv = null;
         var mal_param: MalType = undefined;
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
@@ -363,8 +506,11 @@ pub const LispEnv = struct {
                     .symbol => |symbol| {
                         fnName = symbol;
                     },
-                    .function => |func| {
-                        lambda_function_pointer = func;
+                    .function => |_lambda| {
+                        _ = _lambda;
+                        // utils.log("TEST", "1");
+                        // lambda_function_pointer = _lambda.func;
+                        // utils.log("TEST", "2");
                         // TODO: Stub to by-pass the further eval steps
                         // and proceed to generate params for the function.
                         // A more sophisticated way is preferred later
@@ -372,8 +518,25 @@ pub const LispEnv = struct {
                     },
                     .list => |_list| {
                         // TODO: Eval one more time to check if it is function to run
-                        utils.log("LOG", _list.items[0]);
-                        // _ = _list;
+                        utils.log("LIST", _list.items[0]);
+                        // TODO: Grap the MalType out and apply further.
+                        const innerLisp = try self.applyList(_list);
+                        utils.log("LIST b", innerLisp);
+                        if (innerLisp.as_function()) |_lambda| {
+                            lambda_function_pointer = _lambda;
+                            fnName = "";
+                        } else |_| {}
+                        // const first_symbol = _list.items[0].as_symbol() catch |err| switch (err) {
+                        //     MalTypeError.IllegalType => {
+                        //         utils.log("ERROR", "Illegal type to be evaled");
+                        //         return err;
+                        //     },
+                        //     else => {
+                        //         utils.log("ERROR", "Unexpected error");
+                        //         return err;
+                        //     },
+                        // };
+                        // _ = first_symbol;
                     },
                     else => {
                         utils.log("ERROR", "Illegal type to be evaled");
@@ -382,6 +545,11 @@ pub const LispEnv = struct {
                 }
                 continue;
             }
+
+            // TODO: Simple, lazy and hacky way for checking "special" form
+            if (std.hash_map.eqlString(fnName, "lambda")) {
+                mal_param = _mal;
+            } else
 
             // TODO: Simple, lazy and hacky way for checking "special" form
             if (std.hash_map.eqlString(fnName, "let*")) {
@@ -429,6 +597,7 @@ pub const LispEnv = struct {
 
         while (optional_env) |env| {
             var key = MalType{ .symbol = fnName };
+
             if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
                 var fnValue: MalType = undefined;
@@ -437,15 +606,40 @@ pub const LispEnv = struct {
                         fnValue = try @call(.auto, simple_func, .{params.items});
                     },
                     .with_env => |env_func| {
+                        if (std.hash_map.eqlString("lambda", try key.as_symbol())) {
+                            utils.log("parse lambda", params.items[0]);
+                        }
                         fnValue = try @call(.auto, env_func, .{ params.items, self });
                     },
                 }
 
                 return fnValue;
             }
-            // else if (lambda_function_pointer != undefined) {
-            //     return try @call(.auto, lambda_function_pointer, .{params.items});
-            // }
+
+            // TODO
+            else if (lambda_function_pointer) |lambda| {
+                utils.log("run lambda", "1");
+                // TODO: Align the internal key for the function
+                var _key = MalType{ .symbol = "_" };
+                const optional_funcWithAttr = lambda.fnTable.get(&_key);
+                if (optional_funcWithAttr) |funcWithAttr| {
+                    const func = funcWithAttr.func;
+                    var fnValue: MalType = undefined;
+
+                    switch (func) {
+                        .simple => |simple_func| {
+                            fnValue = try @call(.auto, simple_func, .{params.items});
+                        },
+                        else => unreachable,
+                    }
+                    // utils.log_pointer(lambda.inner_func);
+                    // utils.log("ENTER LAMBDA LOG", params.items[0]);
+                    // utils.log("ENTER LAMBDA LOG", lambda.params.*[0]);
+                    // const fnValue = try @call(.auto, lambda.inner_func, .{ lambda, lambda.params, params.items });
+                    utils.log("LOG", fnValue);
+                    return fnValue;
+                }
+            }
             optional_env = env.outer;
         }
 
