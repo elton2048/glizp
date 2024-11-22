@@ -7,7 +7,7 @@ const ArrayList = std.ArrayList;
 const debug = std.debug;
 const mem = std.mem;
 
-const MalType = @import("reader.zig").MalType;
+const MalType = @import("types/lisp.zig").MalType;
 
 const semantic = @import("semantic.zig");
 

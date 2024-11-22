@@ -1,9 +1,10 @@
 const std = @import("std");
 const token_reader = @import("reader.zig");
+const lisp = @import("types/lisp.zig");
 
-const MalType = token_reader.MalType;
-const MalTypeError = token_reader.MalTypeError;
-const LispFunction = token_reader.LispFunction;
+const MalType = lisp.MalType;
+const MalTypeError = lisp.MalTypeError;
+const LispFunction = lisp.LispFunction;
 
 // TODO: Parser part
 pub const EVAL_TABLE = std.StaticStringMap(LispFunction).initComptime(.{

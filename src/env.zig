@@ -6,11 +6,12 @@ const ArrayList = std.ArrayList;
 const data = @import("data.zig");
 const utils = @import("utils.zig");
 
-const MalType = @import("reader.zig").MalType;
-const MalTypeError = @import("reader.zig").MalTypeError;
-const LispFunction = @import("reader.zig").LispFunction;
-const LispFunctionWithEnv = @import("reader.zig").LispFunctionWithEnv;
-const GenericLispFunction = @import("reader.zig").GenericLispFunction;
+const lisp = @import("types/lisp.zig");
+const MalType = lisp.MalType;
+const MalTypeError = lisp.MalTypeError;
+const LispFunction = lisp.LispFunction;
+const LispFunctionWithEnv = lisp.LispFunctionWithEnv;
+const GenericLispFunction = lisp.GenericLispFunction;
 
 /// Pointer to the global environment, this is required as the function signature
 /// is fixed for all LispFunction. And it is require to access the environment
@@ -83,12 +84,11 @@ pub const LispEnv = struct {
     outer: ?*LispEnv,
     allocator: std.mem.Allocator,
     data: std.StringHashMap(MalType),
-    // TODO: Consider using HashMap for both MalType value
-    fnTable: std.StringHashMap(FunctionWithAttributes),
+    fnTable: lisp.LispHashMap(FunctionWithAttributes),
 
     const Self = @This();
 
-    fn readFromStaticMap(baseTable: *std.StringHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunction)) void {
+    fn readFromStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunction)) void {
         for (map.keys()) |key| {
             const optional_func = map.get(key);
             if (optional_func) |func| {
@@ -96,12 +96,20 @@ pub const LispEnv = struct {
                     .type = .internal,
                     .func = GenericLispFunction{ .simple = func },
                 };
-                baseTable.put(key, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
+
+                const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                defer baseTable.allocator.destroy(lispKey);
+
+                lispKey.* = MalType{
+                    .symbol = key,
+                };
+
+                baseTable.put(lispKey, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
             }
         }
     }
 
-    fn readFromEnvStaticMap(baseTable: *std.StringHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunctionWithEnv)) void {
+    fn readFromEnvStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunctionWithEnv)) void {
         for (map.keys()) |key| {
             const optional_func = map.get(key);
             if (optional_func) |func| {
@@ -109,7 +117,15 @@ pub const LispEnv = struct {
                     .type = .internal,
                     .func = GenericLispFunction{ .with_env = func },
                 };
-                baseTable.put(key, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
+
+                const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                defer baseTable.allocator.destroy(lispKey);
+
+                lispKey.* = MalType{
+                    .symbol = key,
+                };
+
+                baseTable.put(lispKey, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
             }
         }
     }
@@ -124,9 +140,10 @@ pub const LispEnv = struct {
         const self = allocator.create(Self) catch @panic("OOM");
 
         const envData = std.StringHashMap(MalType).init(allocator);
+
         // Expected to modify the pointer through function to setup
         // initial function table.
-        const fnTable = @constCast(&std.StringHashMap(FunctionWithAttributes).init(allocator));
+        const fnTable = @constCast(&lisp.LispHashMap(FunctionWithAttributes).init(allocator));
         readFromStaticMap(fnTable, data.EVAL_TABLE);
         readFromEnvStaticMap(fnTable, SPECIAL_ENV_EVAL_TABLE);
 
@@ -147,8 +164,9 @@ pub const LispEnv = struct {
     fn init(allocator: std.mem.Allocator, outer: *Self) *Self {
         const self = allocator.create(Self) catch @panic("OOM");
 
-        const fnTable = std.StringHashMap(FunctionWithAttributes).init(allocator);
         const envData = std.StringHashMap(MalType).init(allocator);
+
+        const fnTable = lisp.LispHashMap(FunctionWithAttributes).init(allocator);
 
         self.* = Self{
             .outer = outer,
@@ -161,26 +179,40 @@ pub const LispEnv = struct {
     }
 
     fn logFnTable(self: *Self) void {
-        var fnTableIter = self.fnTable.keyIterator();
-        while (fnTableIter.next()) |key| {
+        var newfnTableIter = self.fnTable.hash_map.keyIterator();
+        while (newfnTableIter.next()) |key| {
+            const symbol = key.*.as_symbol() catch @panic("Unexpected non-symbol key value");
+
             logz.info()
-                .fmt("[LISP_ENV]", "fnTable fn: '{s}' set.", .{key.*})
+                .fmt("[LISP_ENV]", "fnTable fn: '{s}' set.", .{symbol})
                 .level(.Debug)
                 .log();
         }
     }
 
     pub fn addFn(self: *Self, key: []const u8, value: LispFunction) !void {
+        const lispKey = try self.allocator.create(MalType);
+        defer self.allocator.destroy(lispKey);
+        lispKey.* = MalType{
+            .symbol = key,
+        };
+
         const inputValue = GenericLispFunction{ .simple = value };
-        try self.fnTable.put(key, .{
+        try self.fnTable.put(lispKey, .{
             .func = inputValue,
             .type = .external,
         });
     }
 
     pub fn addFnWithEnv(self: *Self, key: []const u8, value: LispFunctionWithEnv) !void {
+        const lispKey = try self.allocator.create(MalType);
+        defer self.allocator.destroy(lispKey);
+        lispKey.* = MalType{
+            .symbol = key,
+        };
+
         const inputValue = GenericLispFunction{ .with_env = value };
-        try self.fnTable.put(key, .{
+        try self.fnTable.put(lispKey, .{
             .func = inputValue,
             .type = .external,
         });
@@ -325,7 +357,8 @@ pub const LispEnv = struct {
         var optional_env: ?*LispEnv = self;
 
         while (optional_env) |env| {
-            if (env.fnTable.get(fnName)) |funcWithAttr| {
+            var key = MalType{ .symbol = fnName };
+            if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
                 var fnValue: MalType = undefined;
                 switch (func) {

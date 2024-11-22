@@ -10,11 +10,12 @@ const u8_MAX = constants.u8_MAX;
 const token_reader = @import("reader.zig");
 const printer = @import("printer.zig");
 const data = @import("data.zig");
+const lisp = @import("types/lisp.zig");
 
 const ArrayList = std.ArrayList;
 const Reader = token_reader.Reader;
-const MalType = token_reader.MalType;
-const MalTypeError = token_reader.MalTypeError;
+const MalType = lisp.MalType;
+const MalTypeError = lisp.MalTypeError;
 
 const LispEnv = @import("env.zig").LispEnv;
 
