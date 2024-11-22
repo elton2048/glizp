@@ -593,6 +593,26 @@ test "Shell" {
 
     // lambda case in environment
     {
+        var lambda1 = Reader.init(allocator, "(lambda (a) (+ 1 a))");
+        defer lambda1.deinit();
+
+        try testing.expect(lambda1.ast_root == .list);
+
+        const lambda1_value = try env.apply(lambda1.ast_root);
+        // TODO: Need manual deinit as it leaves a lambda function now
+        // This makes the program has the potential leakage issue as
+        // the interrupter may store the function lisp value but never
+        // free.
+        // This is due to the ast_root is in list type, in that layer
+        // the lambda is not evaled but after the apply function, which
+        // makes the normal deinit function does not free the function lisp value.
+        defer lambda1_value.deinit();
+
+        try testing.expect(lambda1_value == .function);
+
+        // const lambda1_value_number = lambda1_value.as_number() catch unreachable;
+        // try testing.expectEqual(3, lambda1_value_number.value);
+
         // Using wrap to call lambda function shall consider one of the
         // special case now as it breaks the normal rule to eval list.
         // In Emacs using funcall to supply params is a more standard way
@@ -605,8 +625,8 @@ test "Shell" {
 
         try testing.expect(wrapped_lambda1.ast_root == .list);
 
-        const lambda1_value = try env.apply(wrapped_lambda1.ast_root);
-        const lambda1_value_number = lambda1_value.as_number() catch unreachable;
-        try testing.expectEqual(3, lambda1_value_number.value);
+        const wrapped_lambda1_value = try env.apply(wrapped_lambda1.ast_root);
+        const wrapped_lambda1_value_number = wrapped_lambda1_value.as_number() catch unreachable;
+        try testing.expectEqual(3, wrapped_lambda1_value_number.value);
     }
 }

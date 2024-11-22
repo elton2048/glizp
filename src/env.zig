@@ -109,30 +109,50 @@ fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return env.apply(statement_true);
 }
 
-// TODO
 fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
-    const Lambda = struct {
-        params: []MalType,
-        pub fn func(inner_params: []MalType) MalTypeError!MalType {
-            // _ = inner_params;
-            utils.log("LOG", inner_params[0]);
-
-            return MalType{ .boolean = false };
-        }
-    };
-
     const newEnv = LispEnv.init(env.allocator, env);
-    defer newEnv.deinit();
-    // _ = params;
-    // _ = env;
+    // TODO: When to deinit?
+    // defer newEnv.deinit();
+
     const fn_params = try params[0].as_list();
     for (fn_params.items) |param| {
-        const symbol = try param.as_symbol();
-
-        _ = symbol;
+        const param_symbol = try param.as_symbol();
+        newEnv.addVar(param_symbol, .Undefined) catch unreachable;
     }
 
-    return MalType{ .function = &Lambda.func };
+    const eval_params = params[1];
+    // TODO: Align the internal key for the function
+    newEnv.addVar("*", eval_params) catch unreachable;
+
+    const inner_fn = struct {
+        pub fn func(_params: []MalType, _env: *LispEnv) MalTypeError!MalType {
+            // TODO: When to deinit if the function is not executed?
+            // See test case in main.zig for such case, it is now deinited manually.
+            // NOTE: deinit the LispEnv when it is done
+            defer _env.deinit();
+
+            // TODO: Align the internal key for the function
+            const eval_statement = _env.getVar("*") catch unreachable;
+            // defer eval_statement.deinit();
+
+            _env.removeVar("*");
+
+            var iter = _env.data.iterator();
+            var index: usize = 0;
+
+            while (iter.next()) |entry| {
+                _ = _env.setVar(entry.key_ptr.*, _params[index]) catch unreachable;
+                index += 1;
+            }
+
+            return _env.apply(eval_statement);
+        }
+    }.func;
+
+    // TODO: Align the internal key for the function
+    newEnv.addFnWithEnv("_", &inner_fn) catch unreachable;
+
+    return MalType{ .function = newEnv };
 }
 
 pub const LispEnv = struct {
@@ -277,6 +297,13 @@ pub const LispEnv = struct {
         try self.data.put(key, value);
     }
 
+    pub fn setVar(self: *Self, key: []const u8, value: MalType) !void {
+        const var_exists = self.data.get(key);
+        std.debug.assert(var_exists.? == .Undefined);
+
+        try self.data.put(key, value);
+    }
+
     pub fn getVar(self: *Self, key: []const u8) !MalType {
         var optional_env: ?*LispEnv = self;
 
@@ -294,7 +321,7 @@ pub const LispEnv = struct {
     }
 
     pub fn removeVar(self: *Self, key: []const u8) void {
-        const success = try self.data.remove(key);
+        const success = self.data.remove(key);
         if (success) {
             logz.info()
                 .fmt("[LISP_ENV]", "var: '{s}' is removed.", .{key})
@@ -344,7 +371,9 @@ pub const LispEnv = struct {
     /// -> 8
     fn applyList(self: *Self, list: ArrayList(MalType)) MalTypeError!MalType {
         var fnName: []const u8 = undefined;
-        var lambda_function_pointer: LispFunction = undefined;
+        var lambda_function_pointer: ?*LispEnv = null;
+        // var lambda_function_pointer: ?*const fn (Lambda, []MalType) MalTypeError!MalType = null;
+        // var lambda_function_pointer: ?LispFunctionWithEnv = null;
         var mal_param: MalType = undefined;
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
@@ -358,13 +387,12 @@ pub const LispEnv = struct {
 
         for (list.items, 0..) |_mal, i| {
             if (i == 0) {
-                utils.log("LOG", _mal);
                 switch (_mal) {
                     .symbol => |symbol| {
                         fnName = symbol;
                     },
-                    .function => |func| {
-                        lambda_function_pointer = func;
+                    .function => |_lambda| {
+                        _ = _lambda;
                         // TODO: Stub to by-pass the further eval steps
                         // and proceed to generate params for the function.
                         // A more sophisticated way is preferred later
@@ -372,8 +400,13 @@ pub const LispEnv = struct {
                     },
                     .list => |_list| {
                         // TODO: Eval one more time to check if it is function to run
-                        utils.log("LOG", _list.items[0]);
-                        // _ = _list;
+                        utils.log("LIST", _list.items[0]);
+                        // TODO: Grap the MalType out and apply further.
+                        const innerLisp = try self.applyList(_list);
+                        if (innerLisp.as_function()) |_lambda| {
+                            lambda_function_pointer = _lambda;
+                            fnName = "";
+                        } else |_| {}
                     },
                     else => {
                         utils.log("ERROR", "Illegal type to be evaled");
@@ -382,6 +415,11 @@ pub const LispEnv = struct {
                 }
                 continue;
             }
+
+            // TODO: Simple, lazy and hacky way for checking "special" form
+            if (std.hash_map.eqlString(fnName, "lambda")) {
+                mal_param = _mal;
+            } else
 
             // TODO: Simple, lazy and hacky way for checking "special" form
             if (std.hash_map.eqlString(fnName, "let*")) {
@@ -429,6 +467,7 @@ pub const LispEnv = struct {
 
         while (optional_env) |env| {
             var key = MalType{ .symbol = fnName };
+
             if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
                 var fnValue: MalType = undefined;
@@ -443,9 +482,26 @@ pub const LispEnv = struct {
 
                 return fnValue;
             }
-            // else if (lambda_function_pointer != undefined) {
-            //     return try @call(.auto, lambda_function_pointer, .{params.items});
-            // }
+
+            // TODO
+            else if (lambda_function_pointer) |lambda| {
+                // TODO: Align the internal key for the function
+                var _key = MalType{ .symbol = "_" };
+                defer _key.deinit();
+
+                if (lambda.fnTable.get(&_key)) |funcWithAttr| {
+                    const func = funcWithAttr.func;
+                    var fnValue: MalType = undefined;
+
+                    switch (func) {
+                        .with_env => |with_env_func| {
+                            fnValue = try @call(.auto, with_env_func, .{ params.items, lambda });
+                        },
+                        else => unreachable,
+                    }
+                    return fnValue;
+                }
+            }
             optional_env = env.outer;
         }
 

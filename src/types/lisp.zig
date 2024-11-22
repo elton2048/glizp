@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const HashMap = hash_map.HashMap;
 
+const utils = @import("../utils.zig");
 const LispEnv = @import("../env.zig").LispEnv;
 
 pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
@@ -38,11 +39,13 @@ pub const MalType = union(enum) {
     /// General symbol type including function keyword
     symbol: []const u8,
 
-    function: LispFunction,
+    function: *LispEnv,
 
     SExprEnd,
     /// Incompleted type from parser
     Incompleted,
+    /// Undefined param for function
+    Undefined,
 
     pub fn deinit(self: MalType) void {
         switch (self) {
@@ -54,6 +57,9 @@ pub const MalType = union(enum) {
                     item.deinit();
                 }
                 list.deinit();
+            },
+            .function => |func_with_env| {
+                func_with_env.deinit();
             },
             else => {},
         }
@@ -104,7 +110,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_function(self: MalType) MalTypeError!LispFunction {
+    pub fn as_function(self: MalType) MalTypeError!*LispEnv {
         switch (self) {
             .function => |func| {
                 return func;
