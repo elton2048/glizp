@@ -293,12 +293,7 @@ pub const Shell = struct {
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
                             try self.frontend.insert(null, '\n', self.buffer_pos);
-                            try self.frontend.deleteBackwardChar(null, self.buffer_pos);
                             reading = false;
-
-                            if (statement.len == 0) {
-                                continue;
-                            }
 
                             // TODO: Parsing the latest statement and store
                             // in the Shell within the function. This makes
@@ -306,6 +301,10 @@ pub const Shell = struct {
                             // more difficult. Need a more modular approach
                             // for this.
                             self.*.curr_read = parsing_statement(statement);
+
+                            if (statement.len == 0) {
+                                continue;
+                            }
 
                             try self.*.history.append(statement);
                             // Reset history
