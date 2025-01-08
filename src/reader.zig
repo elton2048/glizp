@@ -152,6 +152,12 @@ pub const Reader = struct {
     pub fn read_form(self: *Reader) MalType {
         var mal: MalType = undefined;
 
+        // Early return for empty case
+        if (self.tokens.items.len == 0) {
+            mal = .Incompleted;
+            return mal;
+        }
+
         const token = self.peek() catch @panic("Accessing invalid token.");
         for (token) |char| {
             // TODO: Currently check only the first char and handle that
@@ -297,6 +303,14 @@ const testing = std.testing;
 
 test "Reader" {
     const allocator = std.testing.allocator;
+
+    // Empty string cases
+    {
+        const empty1 = Reader.init(allocator, "");
+        defer empty1.deinit();
+
+        try testing.expect(empty1.ast_root == .Incompleted);
+    }
 
     // Simple cases
     {
