@@ -19,6 +19,8 @@ pub const GenericLispFunction = union(enum) {
 
 pub const List = ArrayList(MalType);
 
+pub const Vector = List;
+
 pub const MalTypeError = error{
     Unhandled,
     IllegalType,
@@ -36,6 +38,8 @@ pub const MalType = union(enum) {
     /// to create is by using double quotes.
     string: ArrayList(u8),
     list: List,
+    /// Vector type, which provide constant-time element access
+    vector: Vector,
     /// General symbol type including function keyword
     symbol: []const u8,
 
@@ -57,6 +61,12 @@ pub const MalType = union(enum) {
                     item.deinit();
                 }
                 list.deinit();
+            },
+            .vector => |vector| {
+                for (vector.items) |item| {
+                    item.deinit();
+                }
+                vector.deinit();
             },
             .function => |func_with_env| {
                 func_with_env.deinit();
@@ -105,6 +115,15 @@ pub const MalType = union(enum) {
         switch (self) {
             .list => |list| {
                 return list;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_vector(self: MalType) MalTypeError!Vector {
+        switch (self) {
+            .vector => |vector| {
+                return vector;
             },
             else => return MalTypeError.IllegalType,
         }

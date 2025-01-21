@@ -62,7 +62,7 @@ fn parsing_statement(statement: []const u8) *token_reader.Reader {
     const str = printer.pr_str(read_result.ast_root, true);
 
     logz.info()
-        .fmt("[LOG]", "print: {any}", .{str})
+        .fmt("[LOG]", "print: \"{s}\"", .{str})
         .log();
 
     return read_result;
@@ -637,5 +637,23 @@ test "Shell" {
         const wrapped_lambda2_value = try env.apply(wrapped_lambda2.ast_root);
         const wrapped_lambda2_value_number = wrapped_lambda2_value.as_number() catch unreachable;
         try testing.expectEqual(6, wrapped_lambda2_value_number.value);
+    }
+
+    // Data structure: Vector
+    {
+        var vector1 = Reader.init(allocator, "(vector 1 2)");
+        defer vector1.deinit();
+
+        try testing.expect(vector1.ast_root == .list);
+
+        const vector1_value = try env.apply(vector1.ast_root);
+        const vector1_value_vector = vector1_value.as_vector() catch unreachable;
+        defer vector1_value_vector.deinit();
+
+        const first = vector1_value_vector.items[0].as_number() catch unreachable;
+        try testing.expectEqual(1, first.value);
+
+        const second = vector1_value_vector.items[1].as_number() catch unreachable;
+        try testing.expectEqual(2, second.value);
     }
 }
