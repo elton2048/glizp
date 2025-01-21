@@ -28,6 +28,8 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "let*", &letX },
     .{ "if", &ifFunc },
     .{ "lambda", &lambdaFunc },
+    // TODO: See if need to extract this out?
+    .{ "vector", &vectorFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -44,6 +46,18 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    var vector = ArrayList(MalType).init(env.allocator);
+
+    vector.insertSlice(0, params) catch |err| switch (err) {
+        error.OutOfMemory => return MalTypeError.IllegalType,
+    };
+
+    const mal = MalType{ .vector = vector };
+
+    return mal;
+}
 
 fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 2);
@@ -512,6 +526,7 @@ pub const LispEnv = struct {
 };
 
 const testing = std.testing;
+const Reader = @import("reader.zig").Reader;
 
 test "env" {
     const allocator = std.testing.allocator;
@@ -545,5 +560,24 @@ test "env" {
         const plus1_value = try env.apply(plus1);
         const plus1_value_number = plus1_value.as_number() catch unreachable;
         try testing.expectEqual(3, plus1_value_number.value);
+    }
+
+    // Data structure: Vector
+    {
+        var vector1 = Reader.init(allocator, "(vector 1 2)");
+        defer vector1.deinit();
+
+        const env = LispEnv.init_root(allocator);
+        defer env.deinit();
+
+        const vector1_value = try env.apply(vector1.ast_root);
+        const vector1_value_vector = vector1_value.as_vector() catch unreachable;
+        defer vector1_value_vector.deinit();
+
+        const first = vector1_value_vector.items[0].as_number() catch unreachable;
+        try testing.expectEqual(1, first.value);
+
+        const second = vector1_value_vector.items[1].as_number() catch unreachable;
+        try testing.expectEqual(2, second.value);
     }
 }
