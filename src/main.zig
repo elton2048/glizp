@@ -62,7 +62,7 @@ fn parsing_statement(statement: []const u8) *token_reader.Reader {
     const str = printer.pr_str(read_result.ast_root, true);
 
     logz.info()
-        .fmt("[LOG]", "print: {any}", .{str})
+        .fmt("[LOG]", "print: \"{s}\"", .{str})
         .log();
 
     return read_result;

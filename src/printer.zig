@@ -67,6 +67,17 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         .function => |_| {
             string.appendSlice("#<function>") catch @panic("allocator error");
         },
+        .vector => |vector| {
+            string.appendSlice("[") catch @panic("allocator error");
+            for (vector.items) |item| {
+                const result = pr_str(item, print_readably);
+                string.appendSlice(result) catch @panic("allocator error");
+                string.appendSlice(" ") catch @panic("allocator error");
+            }
+            // Remove the last space
+            _ = string.pop();
+            string.appendSlice("]") catch @panic("allocator error");
+        },
         else => {},
     }
 
