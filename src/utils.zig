@@ -61,10 +61,18 @@ pub fn log(comptime key: []const u8, message: anytype) void {
                     std.debug.print("[{s}]: {d}\n", .{ key, message });
                     return;
                 },
+                .Struct => {
+                    std.debug.print("[{s}]: {any}\n", .{ key, message });
+                    return;
+                },
+                .Union => {
+                    std.debug.print("[{s}]: {any}\n", .{ key, message });
+                    return;
+                },
                 else => {
                     // Uncomment the following to debug further.
-                    // std.debug.print("{any}\n", .{TT});
-                    @panic("Not implemented to handle Pointer of non-array types.");
+                    std.debug.print("{any}\n", .{TT});
+                    // @panic("Not implemented to handle Pointer of non-array types.");
                 },
             }
         },

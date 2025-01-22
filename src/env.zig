@@ -30,6 +30,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "lambda", &lambdaFunc },
     // TODO: See if need to extract this out?
     .{ "vector", &vectorFunc },
+    .{ "vectorp", &isVectorFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -57,6 +58,27 @@ fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const mal = MalType{ .vector = vector };
 
     return mal;
+}
+
+fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // _ = env;
+    // TODO: return better error.
+    std.debug.assert(params.len == 1);
+
+    // TODO: Logic to check params first
+    const result = try get(params, env);
+    // const result = params[0];
+    return vectorLikeFunc(result);
+}
+
+fn vectorLikeFunc(params: MalType) MalTypeError!MalType {
+    if (params.as_vector()) |_| {
+        return MalType{ .boolean = true };
+    } else |_| {
+        return MalType{ .boolean = false };
+    }
+
+    return MalType{ .boolean = false };
 }
 
 fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
@@ -219,6 +241,10 @@ pub const LispEnv = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // var iter = self.data.iterator();
+        // while (iter.next()) |item| {
+        //     item.value_ptr.deinit();
+        // }
         self.data.deinit();
         self.fnTable.deinit();
         self.allocator.destroy(self);
@@ -354,10 +380,28 @@ pub const LispEnv = struct {
     /// For list, it evals in the runtime environment and return the result.
     /// For symbol, it checks if the environment contains such value and
     /// return accordingly.
+    ///
+    /// The caller handles the memory allocated, check if the result is handled properly.
     pub fn apply(self: *Self, mal: MalType) !MalType {
+        utils.log("TEST", "apply");
         switch (mal) {
             .list => |list| {
-                return self.applyList(list, false);
+                const a = self.applyList(list, false);
+                utils.log("TEST", "after");
+
+                // TODO: Why need to init inside but not in env level?
+                // NOTE: deinit on the item inside the hash map and the env
+                // is different
+                var iter = self.data.iterator();
+                while (iter.next()) |item| {
+                    utils.log("AFTER_ITEM", item.value_ptr);
+
+                    defer item.value_ptr.deinit();
+                }
+
+                // defer self.deinit();
+
+                return a;
             },
             .symbol => |symbol| {
                 return self.getVar(symbol);
@@ -383,6 +427,7 @@ pub const LispEnv = struct {
     /// -> (+ 3 5)               ;; Hit the list (+2 3); Eval (+ 2 3), perhaps in new thread?
     /// -> 8
     fn applyList(self: *Self, list: ArrayList(MalType), nested: bool) MalTypeError!MalType {
+        utils.log("NESTED", nested);
         var fnName: []const u8 = undefined;
         var lambda_function_pointer: ?*LispEnv = null;
         var mal_param: MalType = undefined;
@@ -446,6 +491,8 @@ pub const LispEnv = struct {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
+                        defer mal_param.deinit();
+
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
                         }
@@ -460,6 +507,8 @@ pub const LispEnv = struct {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
+                        defer mal_param.deinit();
+
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
                         }
@@ -479,7 +528,16 @@ pub const LispEnv = struct {
         var optional_env: ?*LispEnv = self;
 
         while (optional_env) |env| {
+            // defer env.deinit();
+            // std.debug.print("[TEST]: {any}\n", .{env});
+            // utils.log("TEST_DATA", env.data);
+            // var iter = env.data.iterator();
+            // while (iter.next()) |item| {
+            //     utils.log("ITEM", item.value_ptr);
+            // }
+            // defer env.data.deinit();
             var key = MalType{ .symbol = fnName };
+            // utils.log("KEY", key);
 
             if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
@@ -492,6 +550,7 @@ pub const LispEnv = struct {
                         fnValue = try @call(.auto, env_func, .{ params.items, self });
                     },
                 }
+                utils.log("TEST", fnValue);
 
                 if (!lambda_func_run_checker) {
                     defer fnValue.deinit();
@@ -518,6 +577,7 @@ pub const LispEnv = struct {
                         },
                         else => unreachable,
                     }
+                    // utils.log("TEST", fnValue);
                     return fnValue;
                 }
             }
@@ -563,6 +623,19 @@ test "env" {
         const plus1_value = try env.apply(plus1);
         const plus1_value_number = plus1_value.as_number() catch unreachable;
         try testing.expectEqual(3, plus1_value_number.value);
+    }
+
+    // plus function
+    {
+        var plus1_statement = Reader.init(allocator, "(+ 1 2)");
+        defer plus1_statement.deinit();
+
+        const env = LispEnv.init_root(allocator);
+        defer env.deinit();
+
+        const plus1_statement_value = try env.apply(plus1_statement.ast_root);
+        const plus1_statement_value_number = plus1_statement_value.as_number() catch unreachable;
+        try testing.expectEqual(3, plus1_statement_value_number.value);
     }
 
     // Data structure: Vector

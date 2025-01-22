@@ -40,3 +40,4 @@ Frontend layer for display purpose. This is expected to be generalize as fronten
 ## Miscellaneous
   - [ ] Using tree-sitter for language parser
   - [ ] Keymap feature
+    - [ ] Implement `keymap-set`/`define-key` lisp function in Zig layer (Original function in `keymap.c` for C version)

@@ -655,5 +655,35 @@ test "Shell" {
 
         const second = vector1_value_vector.items[1].as_number() catch unreachable;
         try testing.expectEqual(2, second.value);
+
+        // var is_vector = Reader.init(allocator, "(vectorp (vector 1 2))");
+        // defer is_vector.deinit();
+
+        // try testing.expect(is_vector.ast_root == .list);
+
+        // const is_vector_value = try env.apply(is_vector.ast_root);
+        // defer is_vector_value.deinit();
+
+        // const is_vector_value_bool = is_vector_value.as_boolean() catch unreachable;
+        // try testing.expectEqual(true, is_vector_value_bool);
+
+        // var is_not_vector = Reader.init(allocator, "(vectorp nil)");
+        // defer is_not_vector.deinit();
+
+        // try testing.expect(is_not_vector.ast_root == .list);
+
+        // const is_not_vector_value = try env.apply(is_not_vector.ast_root);
+        // const is_not_vector_value_bool = is_not_vector_value.as_boolean() catch unreachable;
+        // try testing.expectEqual(false, is_not_vector_value_bool);
+
+        // utils.log("DEBUG", "is_vector_var");
+        // const is_vector_var = Reader.init(allocator, "(let* ((vector_param (vector 1 2))) (vectorp vector_param))");
+        // defer is_vector_var.deinit();
+
+        // // TODO: Vector created will be leaked out, how to deinit it correctly?
+
+        // const is_vector_var_value = try env.apply(is_vector_var.ast_root);
+        // const is_vector_var_value_bool = is_vector_var_value.as_boolean() catch unreachable;
+        // try testing.expectEqual(true, is_vector_var_value_bool);
     }
 }

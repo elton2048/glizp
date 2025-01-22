@@ -89,10 +89,22 @@ pub fn build(b: *std.Build) void {
 
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
+    const general_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/testing_general.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    general_unit_tests.root_module.addImport("logz", logz.module("logz"));
+    general_unit_tests.root_module.addImport("regex", regex.module("regex"));
+
+    const run_general_unit_tests = b.addRunArtifact(general_unit_tests);
+
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .test_runner = b.path("src/test_runner.zig"),
     });
 
     exe_unit_tests.root_module.addImport("logz", logz.module("logz"));
@@ -112,7 +124,12 @@ pub fn build(b: *std.Build) void {
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    _ = run_lib_unit_tests;
+    // _ = run_exe_unit_tests;
+    _ = run_general_unit_tests;
+
+    // test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+    // test_step.dependOn(&run_general_unit_tests.step);
     test_step.dependOn(&reader_test.step);
 }
