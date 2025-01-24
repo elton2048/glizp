@@ -27,6 +27,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "def!", &set },
     .{ "let*", &letX },
     .{ "if", &ifFunc },
+    .{ "lambda", &lambdaFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -40,6 +41,9 @@ pub const FunctionWithAttributes = struct {
     type: FunctionType,
     func: GenericLispFunction,
 };
+
+const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
+const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
 
 fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 2);
@@ -73,6 +77,7 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     defer newEnv.deinit();
 
     for (bindings.items) |binding| {
+        // NOTE: Using list for binding
         const list = try binding.as_list();
 
         _ = try set(list.items, newEnv);
@@ -105,6 +110,48 @@ fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         return env.apply(statement_false);
     }
     return env.apply(statement_true);
+}
+
+fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const newEnv = LispEnv.init(env.allocator, env);
+    // TODO: When to deinit?
+    // defer newEnv.deinit();
+
+    const fn_params = try params[0].as_list();
+    for (fn_params.items) |param| {
+        const param_symbol = try param.as_symbol();
+        newEnv.addVar(param_symbol, .Undefined) catch unreachable;
+    }
+
+    const eval_params = params[1];
+    newEnv.addVar(LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY, eval_params) catch unreachable;
+
+    const inner_fn = struct {
+        pub fn func(_params: []MalType, _env: *LispEnv) MalTypeError!MalType {
+            // NOTE: deinit the LispEnv when it is done
+            defer _env.deinit();
+
+            // NOTE: deinit for the statement is controlled in applyList
+            // function
+            const eval_statement = _env.getVar(LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY) catch unreachable;
+
+            _env.removeVar(LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY);
+
+            var iter = _env.data.iterator();
+            var index: usize = 0;
+
+            while (iter.next()) |entry| {
+                _ = _env.setVar(entry.key_ptr.*, _params[index]) catch unreachable;
+                index += 1;
+            }
+
+            return _env.apply(eval_statement);
+        }
+    }.func;
+
+    newEnv.addFnWithEnv(LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY, &inner_fn) catch unreachable;
+
+    return MalType{ .function = newEnv };
 }
 
 pub const LispEnv = struct {
@@ -249,6 +296,13 @@ pub const LispEnv = struct {
         try self.data.put(key, value);
     }
 
+    pub fn setVar(self: *Self, key: []const u8, value: MalType) !void {
+        const var_exists = self.data.get(key);
+        std.debug.assert(var_exists.? == .Undefined);
+
+        try self.data.put(key, value);
+    }
+
     pub fn getVar(self: *Self, key: []const u8) !MalType {
         var optional_env: ?*LispEnv = self;
 
@@ -266,7 +320,7 @@ pub const LispEnv = struct {
     }
 
     pub fn removeVar(self: *Self, key: []const u8) void {
-        const success = try self.data.remove(key);
+        const success = self.data.remove(key);
         if (success) {
             logz.info()
                 .fmt("[LISP_ENV]", "var: '{s}' is removed.", .{key})
@@ -289,7 +343,7 @@ pub const LispEnv = struct {
     pub fn apply(self: *Self, mal: MalType) !MalType {
         switch (mal) {
             .list => |list| {
-                return self.applyList(list);
+                return self.applyList(list, false);
             },
             .symbol => |symbol| {
                 return self.getVar(symbol);
@@ -311,9 +365,11 @@ pub const LispEnv = struct {
     /// -> (+ 3 (+ 2 3))         ;; Hit (+ 1 2), call add function with accum = 1 and param = 2
     /// -> (+ 3 5)               ;; Hit the list (+2 3); Eval (+ 2 3), perhaps in new thread?
     /// -> 8
-    fn applyList(self: *Self, list: ArrayList(MalType)) MalTypeError!MalType {
+    fn applyList(self: *Self, list: ArrayList(MalType), nested: bool) MalTypeError!MalType {
         var fnName: []const u8 = undefined;
+        var lambda_function_pointer: ?*LispEnv = null;
         var mal_param: MalType = undefined;
+        var lambda_func_run_checker: bool = true;
         var gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const allocator = gpa.allocator();
 
@@ -326,25 +382,47 @@ pub const LispEnv = struct {
 
         for (list.items, 0..) |_mal, i| {
             if (i == 0) {
-                fnName = _mal.as_symbol() catch |err| switch (err) {
-                    MalTypeError.IllegalType => {
-                        utils.log("ERROR", "Invalid symbol type to apply");
-                        return err;
+                switch (_mal) {
+                    .symbol => |symbol| {
+                        fnName = symbol;
+                    },
+                    .function => |_lambda| {
+                        _ = _lambda;
+                        // TODO: Stub to by-pass the further eval steps
+                        // and proceed to generate params for the function.
+                        // A more sophisticated way is preferred later
+                        fnName = "";
+                    },
+                    .list => |_list| {
+                        // TODO: Grap the MalType out and apply further.
+                        const innerLisp = try self.applyList(_list, true);
+                        if (innerLisp.as_function()) |_lambda| {
+                            lambda_function_pointer = _lambda;
+                            fnName = "";
+                        } else |_| {}
                     },
                     else => {
-                        utils.log("ERROR", "Unhandled error");
-                        return err;
+                        utils.log("ERROR", "Illegal type to be evaled");
+                        return MalTypeError.IllegalType;
                     },
-                };
+                }
                 continue;
             }
 
-            // TODO: Simple, lazy and hacky way for checking "special" form
+            // TODO: Simple and lazy way for checking "special" form
+            if (std.hash_map.eqlString(fnName, "lambda")) {
+                if (!nested) {
+                    lambda_func_run_checker = false;
+                }
+                mal_param = _mal;
+            } else
+
+            // TODO: Simple and lazy way for checking "special" form
             if (std.hash_map.eqlString(fnName, "let*")) {
                 mal_param = _mal;
             } else
 
-            // TODO: Simple, lazy and hacky way for checking "special" form
+            // TODO: Simple and lazy way for checking "special" form
             if (SPECIAL_ENV_EVAL_TABLE.has(fnName)) {
                 switch (_mal) {
                     .list => {
@@ -385,6 +463,7 @@ pub const LispEnv = struct {
 
         while (optional_env) |env| {
             var key = MalType{ .symbol = fnName };
+
             if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
                 var fnValue: MalType = undefined;
@@ -397,7 +476,33 @@ pub const LispEnv = struct {
                     },
                 }
 
+                if (!lambda_func_run_checker) {
+                    defer fnValue.deinit();
+                }
+
                 return fnValue;
+            }
+
+            // For lambda function case, excepted to have an inner eval
+            // of the lambda function already.
+            else if (lambda_function_pointer) |lambda| {
+                // TODO: This may not be useful at all
+                lambda_func_run_checker = true;
+                var _key = MalType{ .symbol = LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY };
+                defer _key.deinit();
+
+                if (lambda.fnTable.get(&_key)) |funcWithAttr| {
+                    const func = funcWithAttr.func;
+                    var fnValue: MalType = undefined;
+
+                    switch (func) {
+                        .with_env => |env_func| {
+                            fnValue = try @call(.auto, env_func, .{ params.items, lambda });
+                        },
+                        else => unreachable,
+                    }
+                    return fnValue;
+                }
             }
             optional_env = env.outer;
         }
