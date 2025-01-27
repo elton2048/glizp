@@ -295,6 +295,25 @@ test "lambda function - simple case - multiple variables" {
     try testing.expectEqualStrings("6", result);
 }
 
+test "[] syntax to create vector - simple case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vector_statement = Reader.init(allocator, "[1 2]");
+    defer vector_statement.deinit();
+
+    try testing.expect(vector_statement.ast_root == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    defer vector_statement_value.deinit();
+
+    const result = printer.pr_str(vector_statement_value, true);
+    try testing.expectEqualStrings("[1 2]", result);
+}
+
 test "vector function - simple case" {
     const allocator = testing.allocator;
 

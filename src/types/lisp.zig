@@ -46,6 +46,7 @@ pub const MalType = union(enum) {
     function: *LispEnv,
 
     SExprEnd,
+    VectorExprEnd,
     /// Incompleted type from parser
     Incompleted,
     /// Undefined param for function

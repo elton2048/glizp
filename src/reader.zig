@@ -8,6 +8,7 @@ const iterator = @import("iterator.zig");
 
 const lisp = @import("types/lisp.zig");
 const List = lisp.List;
+const Vector = lisp.Vector;
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 
@@ -25,10 +26,14 @@ const ReaderError = error{
     EOF,
 
     UnmatchedSExpr,
+    UnmatchedVectorExpr,
 };
 
 const SExprStart = '(';
 const SExprEnd = ')';
+
+const VectorExprStart = '[';
+const VectorExprEnd = ']';
 
 fn isDigit(char: u8) bool {
     return char >= '0' and char <= '9';
@@ -183,6 +188,25 @@ pub const Reader = struct {
                 };
             } else if (char == SExprEnd) {
                 mal = .SExprEnd;
+            } else if (char == VectorExprStart) {
+                const list = self.read_vector() catch |err| switch (err) {
+                    ReaderError.UnmatchedVectorExpr => {
+                        logz.err()
+                            .fmt("[LOG]", "statement missed matched parenthesis", .{})
+                            .log();
+
+                        mal = .Incompleted;
+                        break;
+                    },
+                    else => {
+                        @panic("Unexpected error");
+                    },
+                };
+                mal = MalType{
+                    .list = list,
+                };
+            } else if (char == VectorExprEnd) {
+                mal = .VectorExprEnd;
             } else {
                 mal = self.read_atom(token);
             }
@@ -234,6 +258,49 @@ pub const Reader = struct {
         }
 
         // NOTE: Free the memory later to avoid memory leakage
+        return list;
+    }
+
+    /// Reading vector from string, it appends a "vector" symbol at the
+    /// beginning of the list then append all items within bracket to
+    /// create vector data structure.
+    pub fn read_vector(self: *Reader) !ArrayList(MalType) {
+        var list = self.createList();
+        errdefer {
+            list.deinit();
+        }
+
+        var end = false;
+        const vectorLisp = MalType{ .symbol = "vector" };
+        try list.append(vectorLisp);
+        while (self.next()) |_| {
+            const malType = self.read_form();
+
+            // NOTE: append action could mutate the original object as it access
+            // the pointer and expand memory.
+            switch (malType) {
+                .VectorExprEnd => {
+                    end = true;
+                    break;
+                },
+                else => {
+                    try list.append(malType);
+                },
+            }
+        } else |err| {
+            switch (err) {
+                // TODO: Need to handle, see if log or throw it out
+                ReaderError.Overflow => {},
+                // Expected case
+                ReaderError.EOF => {},
+                else => {},
+            }
+        }
+
+        if (!end) {
+            return ReaderError.UnmatchedVectorExpr;
+        }
+
         return list;
     }
 
@@ -417,6 +484,36 @@ test "list case - multiple list case" {
     try testing.expect(sub_list2.items[0] == .number);
     const sub_list2_val = sub_list2.items[0].as_number() catch unreachable;
     try testing.expectEqual(2, sub_list2_val.value);
+}
+
+test "vector case - empty case" {
+    const allocator = std.testing.allocator;
+
+    // Vector cases
+    var empty_vector = Reader.init(allocator, "[]");
+    defer empty_vector.deinit();
+
+    const empty_vector_list = empty_vector.ast_root.as_list() catch unreachable;
+    const empty_vector_list_symbol = empty_vector_list.items[0].as_symbol() catch unreachable;
+    try testing.expectEqualStrings("vector", empty_vector_list_symbol);
+
+    try testing.expectEqual(1, empty_vector_list.items.len);
+}
+
+test "vector case - normal case" {
+    const allocator = std.testing.allocator;
+
+    var vector_statement = Reader.init(allocator, "[1]");
+    defer vector_statement.deinit();
+
+    try testing.expect(vector_statement.ast_root == .list);
+
+    const vector_statement_list = vector_statement.ast_root.as_list() catch unreachable;
+    const vector_statement_list_symbol = vector_statement_list.items[0].as_symbol() catch unreachable;
+    try testing.expectEqualStrings("vector", vector_statement_list_symbol);
+
+    const vector_statement_list_item_1 = vector_statement_list.items[1].as_number() catch unreachable;
+    try testing.expectEqual(1, vector_statement_list_item_1.value);
 }
 
 test "incompleted statement case" {
