@@ -48,6 +48,16 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("regex", regex.module("regex"));
 
+    // Provides glizp module out, which makes glizp to be used as a library.
+    const glizp_module = b.addModule("glizp", .{
+        .root_source_file = b.path("src/lib.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    glizp_module.addImport("logz", logz.module("logz"));
+    glizp_module.addImport("regex", regex.module("regex"));
+
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
     // step when running `zig build`).
@@ -76,23 +86,28 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Creates a step for unit testing. This only builds the test executable
+    // Creates a step for general testing. This only builds the test executable
     // but does not run it.
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
+    const general_tests = b.addTest(.{
+        .root_source_file = b.path("tests/testing_lisp_general.zig"),
         .target = target,
         .optimize = optimize,
+        .test_runner = b.path("test_runner.zig"),
     });
 
-    lib_unit_tests.root_module.addImport("logz", logz.module("logz"));
-    lib_unit_tests.root_module.addImport("regex", regex.module("regex"));
+    general_tests.root_module.addImport("glizp", glizp_module);
+    general_tests.root_module.addImport("logz", logz.module("logz"));
+    general_tests.root_module.addImport("regex", regex.module("regex"));
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_general_tests = b.addRunArtifact(general_tests);
 
+    // Creates a step for unit testing. This only builds the test executable
+    // but does not run it.
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .test_runner = b.path("test_runner.zig"),
     });
 
     exe_unit_tests.root_module.addImport("logz", logz.module("logz"));
@@ -104,6 +119,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("./src/reader.zig"),
         .target = target,
         .optimize = optimize,
+        .test_runner = b.path("test_runner.zig"),
     });
     reader_test.root_module.addImport("logz", logz.module("logz"));
     reader_test.root_module.addImport("regex", regex.module("regex"));
@@ -112,7 +128,8 @@ pub fn build(b: *std.Build) void {
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+
     test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_general_tests.step);
     test_step.dependOn(&reader_test.step);
 }
