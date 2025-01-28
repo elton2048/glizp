@@ -294,3 +294,96 @@ test "lambda function - simple case - multiple variables" {
     const result = printer.pr_str(lambda_statement_value, true);
     try testing.expectEqualStrings("6", result);
 }
+
+test "[] syntax to create vector - simple case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vector_statement = Reader.init(allocator, "[1 2]");
+    defer vector_statement.deinit();
+
+    try testing.expect(vector_statement.ast_root == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    defer vector_statement_value.deinit();
+
+    const result = printer.pr_str(vector_statement_value, true);
+    try testing.expectEqualStrings("[1 2]", result);
+}
+
+test "vector function - simple case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vector_statement = Reader.init(allocator, "(vector 1 2)");
+    defer vector_statement.deinit();
+
+    try testing.expect(vector_statement.ast_root == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    defer vector_statement_value.deinit();
+
+    const result = printer.pr_str(vector_statement_value, true);
+    try testing.expectEqualStrings("[1 2]", result);
+}
+
+test "vectorp function - truthy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vectorp_statement = Reader.init(allocator, "(vectorp (vector 1 2))");
+    defer vectorp_statement.deinit();
+
+    try testing.expect(vectorp_statement.ast_root == .list);
+
+    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root);
+
+    const result = printer.pr_str(vectorp_statement_value, true);
+    try testing.expectEqualStrings("t", result);
+}
+
+test "vectorp function - falsy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vectorp_statement = Reader.init(allocator, "(vectorp nil)");
+    defer vectorp_statement.deinit();
+
+    try testing.expect(vectorp_statement.ast_root == .list);
+
+    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root);
+
+    const result = printer.pr_str(vectorp_statement_value, true);
+    try testing.expectEqualStrings("nil", result);
+}
+
+test "vectorp function - through let* to create variable case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var is_vector_var_statement = Reader.init(
+        allocator,
+        "(let* ((vector_param (vector 1 2))) (vectorp vector_param))",
+    );
+    defer is_vector_var_statement.deinit();
+
+    const is_vector_var_statement_value = try env.apply(is_vector_var_statement.ast_root);
+
+    const result = printer.pr_str(is_vector_var_statement_value, true);
+    try testing.expectEqualStrings("t", result);
+
+    const is_vector_var_statement_value_bool = is_vector_var_statement_value.as_boolean() catch unreachable;
+    try testing.expectEqual(true, is_vector_var_statement_value_bool);
+}
