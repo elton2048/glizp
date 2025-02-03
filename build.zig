@@ -75,6 +75,17 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const fs_tests = b.addTest(.{
+        .root_source_file = b.path("tests/testing_fs.zig"),
+        .target = target,
+        .optimize = optimize,
+        .test_runner = b.path("test_runner.zig"),
+    });
+
+    fs_tests.root_module.addImport("glizp", glizp_module);
+
+    const run_fs_tests = b.addRunArtifact(fs_tests);
+
     // Creates a step for general testing. This only builds the test executable
     // but does not run it.
     const general_tests = b.addTest(.{
@@ -119,6 +130,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
 
     test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_fs_tests.step);
     test_step.dependOn(&run_general_tests.step);
     test_step.dependOn(&reader_test.step);
 }

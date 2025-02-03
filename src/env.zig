@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 
 const data = @import("data.zig");
 const utils = @import("utils.zig");
+const fs = @import("fs.zig");
 
 const lisp = @import("types/lisp.zig");
 const MalType = lisp.MalType;
@@ -31,6 +32,11 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // TODO: See if need to extract this out?
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
+
+    // NOTE: lread.c in original Emacs
+    // Original "load" function includes to read and execute a file of Lisp code
+    // Whereas this just loads the content
+    .{ "fs-load", &fsLoadFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -192,6 +198,20 @@ fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     newEnv.addFnWithEnv(LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY, &inner_fn) catch unreachable;
 
     return MalType{ .function = newEnv };
+}
+
+fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    std.debug.assert(params.len == 1);
+
+    const sub_path = try params[0].as_string();
+
+    const result = fs.loadFile(env.allocator, sub_path.items) catch |err| switch (err) {
+        else => return MalTypeError.Unhandled,
+    };
+
+    const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
+
+    return MalType{ .string = al_result };
 }
 
 pub const LispEnv = struct {
