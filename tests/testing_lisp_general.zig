@@ -464,3 +464,22 @@ test "fs-load function - load lisp file and execute def" {
     const result = printer.pr_str(verify_statement_value, true);
     try testing.expectEqualStrings("1", result);
 }
+
+test "load function - normal case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var load_statement = Reader.init(
+        allocator,
+        "(load \"tests/sample/test_load.lisp\")",
+    );
+    defer load_statement.deinit();
+
+    const load_statement_value = try env.apply(load_statement.ast_root);
+    defer load_statement_value.deinit();
+
+    const result = printer.pr_str(load_statement_value, true);
+    try testing.expectEqualStrings("1", result);
+}

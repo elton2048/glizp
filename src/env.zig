@@ -37,6 +37,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // Original "load" function includes to read and execute a file of Lisp code
     // Whereas this just loads the content
     .{ "fs-load", &fsLoadFunc },
+    .{ "load", &loadFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -212,6 +213,19 @@ fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
 
     return MalType{ .string = al_result };
+}
+
+fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const file_content = try fsLoadFunc(params, env);
+
+    const content = try file_content.as_string();
+    defer content.deinit();
+
+    // TODO: More convenient to change string to list?
+    const reader = Reader.init(env.allocator, content.items);
+    defer reader.deinit();
+
+    return try env.apply(reader.ast_root);
 }
 
 pub const LispEnv = struct {
