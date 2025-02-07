@@ -99,6 +99,7 @@ fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const value = env.apply(params[1]) catch |err| switch (err) {
         error.IllegalType => return MalTypeError.IllegalType,
         error.Unhandled => return MalTypeError.Unhandled,
+        else => return MalTypeError.Unhandled,
     };
 
     env.addVar(key, value) catch |err| switch (err) {
@@ -207,6 +208,7 @@ fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const sub_path = try params[0].as_string();
 
     const result = fs.loadFile(env.allocator, sub_path.items) catch |err| switch (err) {
+        error.FileNotFound => return MalTypeError.FileNotFound,
         else => return MalTypeError.Unhandled,
     };
 
@@ -216,16 +218,29 @@ fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
 }
 
 fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // NOTE: The content shall be holded within the whole env,
+    // therefore the deinit process should not be done within the function,
+    // but in the env deinit part. Otherwise there will be memory corruption
+    // for non-primitive type.
+    // One common case is to set variable in the env, For example setting "a" to 1.
+    // Since string is in the form of character pointer, it is not a primitive type.
+    // In this case the key "a" is the character pointer. If the pointer content
+    // is clear, the corresponding key will be invalidated as well, causing
+    // getting key "a" returns no value.
     const file_content = try fsLoadFunc(params, env);
 
-    const content = try file_content.as_string();
-    defer content.deinit();
+    env.internalData.append(file_content) catch |err| switch (err) {
+        // TODO: Meaningful error for such case
+        error.OutOfMemory => return MalTypeError.Unhandled,
+    };
 
-    // TODO: More convenient to change string to list?
+    const content = try file_content.as_string();
     const reader = Reader.init(env.allocator, content.items);
     defer reader.deinit();
 
-    return try env.apply(reader.ast_root);
+    const result = try env.apply(reader.ast_root);
+
+    return result;
 }
 
 pub const LispEnv = struct {
@@ -233,6 +248,8 @@ pub const LispEnv = struct {
     allocator: std.mem.Allocator,
     data: std.StringHashMap(MalType),
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
+    // Internal storage for data parsed outside
+    internalData: ArrayList(MalType),
 
     const Self = @This();
 
@@ -281,6 +298,10 @@ pub const LispEnv = struct {
     pub fn deinit(self: *Self) void {
         self.data.deinit();
         self.fnTable.deinit();
+        for (self.internalData.items) |item| {
+            item.deinit();
+        }
+        self.internalData.deinit();
         self.allocator.destroy(self);
     }
 
@@ -295,11 +316,14 @@ pub const LispEnv = struct {
         readFromStaticMap(fnTable, data.EVAL_TABLE);
         readFromEnvStaticMap(fnTable, SPECIAL_ENV_EVAL_TABLE);
 
+        const internalData = ArrayList(MalType).init(allocator);
+
         self.* = Self{
             .outer = null,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable.*,
+            .internalData = internalData,
         };
 
         self.logFnTable();
@@ -316,11 +340,14 @@ pub const LispEnv = struct {
 
         const fnTable = lisp.LispHashMap(FunctionWithAttributes).init(allocator);
 
+        const internalData = ArrayList(MalType).init(allocator);
+
         self.* = Self{
             .outer = outer,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable,
+            .internalData = internalData,
         };
 
         return self;

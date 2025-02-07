@@ -24,6 +24,7 @@ pub const Vector = List;
 pub const MalTypeError = error{
     Unhandled,
     IllegalType,
+    FileNotFound,
 };
 
 pub const Number = struct {

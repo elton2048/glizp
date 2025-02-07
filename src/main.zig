@@ -22,6 +22,8 @@ const LispEnv = @import("env.zig").LispEnv;
 const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
 
+const INIT_CONFIG_FILE = "init.el";
+
 // NOTE: Shall be OS-dependent, to support different emoji it may require
 // to be 8 too.
 const INPUT_BYTE_SIZE = 4;
@@ -197,6 +199,8 @@ pub const Shell = struct {
             .env = env,
         };
 
+        self.loadInitConfigFile() catch @panic("Unexpected error");
+
         self.initConfig();
 
         self.logConfig();
@@ -217,6 +221,22 @@ pub const Shell = struct {
             @panic("Initial config is set already. Unexpect to set again.");
         }
         self.config.set = true;
+    }
+
+    fn loadInitConfigFile(self: *Shell) !void {
+        const load_statement = std.fmt.comptimePrint("(load \"{s}\")", .{INIT_CONFIG_FILE});
+        const load_statement_reader = parsing_statement(load_statement);
+
+        const result = self.env.apply(load_statement_reader.ast_root) catch |err| {
+            utils.log("ERR", err);
+            return;
+        };
+        defer result.deinit();
+
+        self.logger.logger()
+            .fmt("[LOG]", "Loaded \"{s}\" config file", .{INIT_CONFIG_FILE})
+            .level(.Debug)
+            .log();
     }
 
     fn deinit(self: *Shell) void {
