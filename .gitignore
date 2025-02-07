@@ -1,3 +1,6 @@
 .zig-cache
 zig-out
 glizp*.log
+
+# Local init file in Emacs Lisp extension
+init.el

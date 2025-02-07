@@ -387,3 +387,99 @@ test "vectorp function - through let* to create variable case" {
     const is_vector_var_statement_value_bool = is_vector_var_statement_value.as_boolean() catch unreachable;
     try testing.expectEqual(true, is_vector_var_statement_value_bool);
 }
+
+test "fs-load function - normal case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var fs_load_statement = Reader.init(
+        allocator,
+        "(fs-load \"tests/sample/test_fs_file_1.txt\")",
+    );
+    defer fs_load_statement.deinit();
+
+    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root);
+    defer fs_load_statement_value.deinit();
+
+    const result = printer.pr_str(fs_load_statement_value, true);
+    try testing.expectEqualStrings(result,
+        \\"Lorem ipsum dolor sit amet, consectetur
+        \\adipiscing elit. Sed tincidunt erat sed nulla ornare, nec
+        \\aliquet ex laoreet. Ut nec rhoncus nunc. Integer magna metus,
+        \\ultrices eleifend porttitor ut, finibus ut tortor. Maecenas
+        \\sapien justo, finibus tincidunt dictum ac, semper et lectus.
+        \\Vivamus molestie egestas orci ac viverra. Pellentesque nec
+        \\arcu facilisis, euismod eros eu, sodales nisl. Ut egestas
+        \\sagittis arcu, in accumsan sapien rhoncus sit amet. Aenean
+        \\neque lectus, imperdiet ac lobortis a, ullamcorper sed massa.
+        \\Nullam porttitor porttitor erat nec dapibus. Ut vel dui nec
+        \\nulla vulputate molestie eget non nunc. Ut commodo luctus ipsum,
+        \\in finibus libero feugiat eget. Etiam vel ante at urna tincidunt
+        \\posuere sit amet ut felis. Maecenas finibus suscipit tristique.
+        \\Donec viverra non sapien id suscipit.
+        \\"
+    );
+}
+
+test "fs-load function - load lisp file and execute def" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var fs_load_statement = Reader.init(
+        allocator,
+        "(fs-load \"tests/sample/test_fs-load_lisp.lisp\")",
+    );
+    defer fs_load_statement.deinit();
+
+    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root);
+    defer fs_load_statement_value.deinit();
+
+    const fs_load_statement_value_string = try fs_load_statement_value.as_string();
+
+    try testing.expectEqualStrings(
+        \\(def! a 1)
+        \\
+    ,
+        fs_load_statement_value_string.items,
+    );
+
+    var exec_def_statement = Reader.init(
+        allocator,
+        fs_load_statement_value_string.items,
+    );
+    defer exec_def_statement.deinit();
+
+    const exec_def_statement_value = try env.apply(exec_def_statement.ast_root);
+    defer exec_def_statement_value.deinit();
+
+    const verify_statement = Reader.init(allocator, "a");
+    defer verify_statement.deinit();
+
+    const verify_statement_value = try env.apply(verify_statement.ast_root);
+
+    const result = printer.pr_str(verify_statement_value, true);
+    try testing.expectEqualStrings("1", result);
+}
+
+test "load function - normal case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var load_statement = Reader.init(
+        allocator,
+        "(load \"tests/sample/test_load.lisp\")",
+    );
+    defer load_statement.deinit();
+
+    const load_statement_value = try env.apply(load_statement.ast_root);
+    defer load_statement_value.deinit();
+
+    const result = printer.pr_str(load_statement_value, true);
+    try testing.expectEqualStrings("1", result);
+}

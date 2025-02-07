@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 
 const data = @import("data.zig");
 const utils = @import("utils.zig");
+const fs = @import("fs.zig");
 
 const lisp = @import("types/lisp.zig");
 const MalType = lisp.MalType;
@@ -31,6 +32,12 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // TODO: See if need to extract this out?
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
+
+    // NOTE: lread.c in original Emacs
+    // Original "load" function includes to read and execute a file of Lisp code
+    // Whereas this just loads the content
+    .{ "fs-load", &fsLoadFunc },
+    .{ "load", &loadFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -92,6 +99,7 @@ fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const value = env.apply(params[1]) catch |err| switch (err) {
         error.IllegalType => return MalTypeError.IllegalType,
         error.Unhandled => return MalTypeError.Unhandled,
+        else => return MalTypeError.Unhandled,
     };
 
     env.addVar(key, value) catch |err| switch (err) {
@@ -194,11 +202,54 @@ fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return MalType{ .function = newEnv };
 }
 
+fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    std.debug.assert(params.len == 1);
+
+    const sub_path = try params[0].as_string();
+
+    const result = fs.loadFile(env.allocator, sub_path.items) catch |err| switch (err) {
+        error.FileNotFound => return MalTypeError.FileNotFound,
+        else => return MalTypeError.Unhandled,
+    };
+
+    const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
+
+    return MalType{ .string = al_result };
+}
+
+fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // NOTE: The content shall be holded within the whole env,
+    // therefore the deinit process should not be done within the function,
+    // but in the env deinit part. Otherwise there will be memory corruption
+    // for non-primitive type.
+    // One common case is to set variable in the env, For example setting "a" to 1.
+    // Since string is in the form of character pointer, it is not a primitive type.
+    // In this case the key "a" is the character pointer. If the pointer content
+    // is clear, the corresponding key will be invalidated as well, causing
+    // getting key "a" returns no value.
+    const file_content = try fsLoadFunc(params, env);
+
+    env.internalData.append(file_content) catch |err| switch (err) {
+        // TODO: Meaningful error for such case
+        error.OutOfMemory => return MalTypeError.Unhandled,
+    };
+
+    const content = try file_content.as_string();
+    const reader = Reader.init(env.allocator, content.items);
+    defer reader.deinit();
+
+    const result = try env.apply(reader.ast_root);
+
+    return result;
+}
+
 pub const LispEnv = struct {
     outer: ?*LispEnv,
     allocator: std.mem.Allocator,
     data: std.StringHashMap(MalType),
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
+    // Internal storage for data parsed outside
+    internalData: ArrayList(MalType),
 
     const Self = @This();
 
@@ -247,6 +298,10 @@ pub const LispEnv = struct {
     pub fn deinit(self: *Self) void {
         self.data.deinit();
         self.fnTable.deinit();
+        for (self.internalData.items) |item| {
+            item.deinit();
+        }
+        self.internalData.deinit();
         self.allocator.destroy(self);
     }
 
@@ -261,11 +316,14 @@ pub const LispEnv = struct {
         readFromStaticMap(fnTable, data.EVAL_TABLE);
         readFromEnvStaticMap(fnTable, SPECIAL_ENV_EVAL_TABLE);
 
+        const internalData = ArrayList(MalType).init(allocator);
+
         self.* = Self{
             .outer = null,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable.*,
+            .internalData = internalData,
         };
 
         self.logFnTable();
@@ -282,11 +340,14 @@ pub const LispEnv = struct {
 
         const fnTable = lisp.LispHashMap(FunctionWithAttributes).init(allocator);
 
+        const internalData = ArrayList(MalType).init(allocator);
+
         self.* = Self{
             .outer = outer,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable,
+            .internalData = internalData,
         };
 
         return self;
