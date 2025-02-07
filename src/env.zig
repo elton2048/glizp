@@ -28,6 +28,9 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "let*", &letX },
     .{ "if", &ifFunc },
     .{ "lambda", &lambdaFunc },
+    // TODO: See if need to extract this out?
+    .{ "vector", &vectorFunc },
+    .{ "vectorp", &isVectorFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -44,6 +47,43 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    var vector = ArrayList(MalType).init(env.allocator);
+
+    vector.insertSlice(0, params) catch |err| switch (err) {
+        error.OutOfMemory => return MalTypeError.IllegalType,
+    };
+
+    const mal = MalType{ .vector = vector };
+
+    return mal;
+}
+
+fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // TODO: return better error.
+    std.debug.assert(params.len == 1);
+
+    const result = get(params, env) catch |err| switch (err) {
+        error.IllegalType => blk: {
+            break :blk params[0];
+        },
+        else => {
+            return err;
+        },
+    };
+    return vectorLikeFunc(result);
+}
+
+fn vectorLikeFunc(params: MalType) MalTypeError!MalType {
+    if (params.as_vector()) |_| {
+        return MalType{ .boolean = true };
+    } else |_| {
+        return MalType{ .boolean = false };
+    }
+
+    return MalType{ .boolean = false };
+}
 
 fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 2);
@@ -340,10 +380,27 @@ pub const LispEnv = struct {
     /// For list, it evals in the runtime environment and return the result.
     /// For symbol, it checks if the environment contains such value and
     /// return accordingly.
+    ///
+    /// The caller handles the memory allocated, check if the result is handled properly.
     pub fn apply(self: *Self, mal: MalType) !MalType {
         switch (mal) {
             .list => |list| {
-                return self.applyList(list, false);
+                const result = self.applyList(list, false);
+                // NOTE: deinit on the item inside the hash map and the env
+                // is different
+                // If a value is evaled further it will be kept without
+                // direct access. At the deinit stage of the env it cannot
+                // be accessed as the direct access is lost.
+                // Thus deinit the value after each lisp is applied/evaled
+                // for now.
+                // TODO: Should keep such value within the env and further
+                // handle afterwards? Then this is a simple GC job.
+                var iter = self.data.iterator();
+                while (iter.next()) |item| {
+                    defer item.value_ptr.deinit();
+                }
+
+                return result;
             },
             .symbol => |symbol| {
                 return self.getVar(symbol);
@@ -429,6 +486,8 @@ pub const LispEnv = struct {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
+                        defer mal_param.deinit();
+
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
                         }
@@ -443,6 +502,8 @@ pub const LispEnv = struct {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
+                        defer mal_param.deinit();
+
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
                         }
@@ -466,6 +527,8 @@ pub const LispEnv = struct {
 
             if (env.fnTable.get(&key)) |funcWithAttr| {
                 const func = funcWithAttr.func;
+                // NOTE: Entry point to store MalType created within
+                // apply function
                 var fnValue: MalType = undefined;
                 switch (func) {
                     .simple => |simple_func| {
@@ -512,6 +575,7 @@ pub const LispEnv = struct {
 };
 
 const testing = std.testing;
+const Reader = @import("reader.zig").Reader;
 
 test "env" {
     const allocator = std.testing.allocator;
@@ -545,5 +609,24 @@ test "env" {
         const plus1_value = try env.apply(plus1);
         const plus1_value_number = plus1_value.as_number() catch unreachable;
         try testing.expectEqual(3, plus1_value_number.value);
+    }
+
+    // Data structure: Vector
+    {
+        var vector1 = Reader.init(allocator, "(vector 1 2)");
+        defer vector1.deinit();
+
+        const env = LispEnv.init_root(allocator);
+        defer env.deinit();
+
+        const vector1_value = try env.apply(vector1.ast_root);
+        const vector1_value_vector = vector1_value.as_vector() catch unreachable;
+        defer vector1_value_vector.deinit();
+
+        const first = vector1_value_vector.items[0].as_number() catch unreachable;
+        try testing.expectEqual(1, first.value);
+
+        const second = vector1_value_vector.items[1].as_number() catch unreachable;
+        try testing.expectEqual(2, second.value);
     }
 }
