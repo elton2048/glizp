@@ -1,6 +1,8 @@
 const std = @import("std");
 const logz = @import("logz");
 
+const xev = @import("xev");
+
 const ArrayList = std.ArrayList;
 
 const data = @import("data.zig");
@@ -13,6 +15,14 @@ const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
 const LispFunctionWithEnv = lisp.LispFunctionWithEnv;
 const GenericLispFunction = lisp.GenericLispFunction;
+
+const MessageQueue = @import("message_queue.zig").MessageQueue;
+
+// TODO: Stub only
+const Plugin = @import("types/plugin.zig");
+const Message = @import("types/plugin.zig").Message;
+
+const PluginExample = @import("plugin-example.zig").PluginExample;
 
 /// Pointer to the global environment, this is required as the function signature
 /// is fixed for all LispFunction. And it is require to access the environment
@@ -33,11 +43,19 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
 
+    // NOTE: data.c in original Emacs
+    .{ "eq", &eqFunc }, // null in Emacs
+
     // NOTE: lread.c in original Emacs
     // Original "load" function includes to read and execute a file of Lisp code
     // Whereas this just loads the content
     .{ "fs-load", &fsLoadFunc },
     .{ "load", &loadFunc },
+
+    // NOTE: This is more of testing purpose now. It simply sends a message
+    // to a queue and consumed in a loop. This architecture is expected
+    // to be expanded for plugin usage.
+    .{ "msg-append", &messageAppend },
 });
 
 pub const FunctionType = union(enum) {
@@ -54,6 +72,16 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn eqFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // TODO: return better error.
+    // std.debug.assert(params.len == 1);
+
+    _ = params;
+    _ = env;
+
+    return MalType{ .boolean = false };
+}
 
 fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     var vector = ArrayList(MalType).init(env.allocator);
@@ -80,6 +108,25 @@ fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         },
     };
     return vectorLikeFunc(result);
+}
+
+fn messageAppend(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // _ = params;
+    const msg = try params[0].as_string();
+
+    const result = std.fmt.allocPrint(env.allocator, "{s}", .{msg.items}) catch @panic("allocator error");
+
+    env.messageQueue.append(result) catch |err| switch (err) {
+        else => {
+            return MalTypeError.Unhandled;
+        },
+    };
+
+    env.messageQueue.notify() catch |err| switch (err) {
+        error.MachMsgFailed => return MalTypeError.Unhandled,
+    };
+
+    return MalType{ .boolean = true };
 }
 
 fn vectorLikeFunc(params: MalType) MalTypeError!MalType {
@@ -250,6 +297,12 @@ pub const LispEnv = struct {
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
     // Internal storage for data parsed outside
     internalData: ArrayList(MalType),
+    plugins: ArrayList(Plugin),
+    // plugins: []Plugin,
+    // messages: *std.SinglyLinkedList(Message),
+    messageQueue: *MessageQueue,
+    // asyncHandler: xev.Async,
+    num: u8,
 
     const Self = @This();
 
@@ -305,10 +358,110 @@ pub const LispEnv = struct {
         self.allocator.destroy(self);
     }
 
+    const ThreadData = struct {
+        // messages: *std.SinglyLinkedList(Message),
+        messageQueue: *MessageQueue,
+        plugins: *ArrayList(Plugin),
+        data: u8,
+        // handler: *xev.Async,
+    };
+
+    fn loop_test(loopData: ThreadData) !void {
+        // _ = handler;
+        // var asyncHandler = xev.Async.init() catch @panic("testing");
+        // defer asyncHandler.deinit();
+
+        // var asyncHandler = _data.handler;
+
+        var loop = try xev.Loop.init(.{});
+        defer loop.deinit();
+
+        // 5s timer
+        var c: xev.Completion = undefined;
+        const time_interval = 5000;
+
+        loopData.messageQueue.wait(&loop, &c, ThreadData, @constCast(&loopData), (struct {
+            fn callback(
+                userdata: ?*ThreadData,
+                inner_loop: *xev.Loop,
+                completion: *xev.Completion,
+                result: xev.Async.WaitError!void,
+            ) xev.CallbackAction {
+                // const inner_userdata: *ThreadData = @ptrCast(@alignCast(userdata.?));
+                const inner_userdata = userdata.?;
+                if (inner_userdata.messageQueue.getLastOrNull()) |item| {
+                    for (inner_userdata.plugins.items) |plugin| {
+                        plugin.subscribeEvent() catch @panic("plugin subscribeEvent");
+                    }
+
+                    utils.log("CB", item);
+                }
+
+                _ = inner_loop;
+                _ = completion;
+                _ = result catch @panic("testing");
+
+                utils.log("WAIT", inner_userdata.data);
+                return .rearm;
+            }
+        }).callback);
+
+        // _data.handler.notify() catch @panic("testing");
+
+        var c1: xev.Completion = undefined;
+        loop.timer(&c1, time_interval, @constCast(&loopData), (struct {
+            fn callback(
+                userdata: ?*anyopaque,
+                inner_loop: *xev.Loop,
+                completion: *xev.Completion,
+                result: xev.Result,
+            ) xev.CallbackAction {
+                // _ = userdata;
+                _ = result;
+                const inner_userdata: *ThreadData = @ptrCast(@alignCast(userdata.?));
+                inner_userdata.data = inner_userdata.data + 1;
+
+                // var current_gpa = std.heap.GeneralPurposeAllocator(.{}){};
+                // const current_gpa_allocator = current_gpa.allocator();
+
+                // var node = current_gpa_allocator.create(std.SinglyLinkedList(Message).Node) catch @panic("testing");
+                // node.data = .{ .name = 9 };
+                // var one = std.SinglyLinkedList(Message).Node{ .data = msg.* };
+                // inner_userdata.messages.prepend(node);
+                // std.debug.print("[LEN] {d} \n", .{inner_userdata.messages.len()});
+                // utils.log("TIMER", inner_userdata.data);
+                // inner_userdata.handler.notify() catch @panic("testing");
+                inner_loop.timer(completion, time_interval, userdata, &callback);
+                // utils.log("TIMER", "");
+                return .disarm;
+            }
+        }).callback);
+
+        try loop.run(.until_done);
+    }
+
+    pub fn registerPlugin(self: *Self, extension: anytype) !void {
+        // _ = self;
+        // _ = extension;
+
+        // TODO: Any way to check the extension fulfilling the requirement?
+        const plugin = Plugin.init(extension, &self.data, self.messageQueue);
+
+        // // const plugin = extension.plugin(&self.data, &self.messages);
+        self.plugins.append(plugin) catch |err| switch (err) {
+            error.OutOfMemory => {},
+        };
+    }
+
     pub fn init_root(allocator: std.mem.Allocator) *Self {
         const self = allocator.create(Self) catch @panic("OOM");
 
-        const envData = std.StringHashMap(MalType).init(allocator);
+        var envData = std.StringHashMap(MalType).init(allocator);
+        envData.put("a", MalType{ .boolean = true }) catch @panic("testing");
+
+        const messageQueue = MessageQueue.initSPSC(allocator);
+
+        const plugins = ArrayList(Plugin).init(allocator);
 
         // Expected to modify the pointer through function to setup
         // initial function table.
@@ -324,11 +477,27 @@ pub const LispEnv = struct {
             .data = envData,
             .fnTable = fnTable.*,
             .internalData = internalData,
+            .plugins = plugins,
+            // .messages = &messages,
+            .messageQueue = messageQueue,
+            // .asyncHandler = asyncHandler,
+            .num = 0,
         };
 
         self.logFnTable();
 
         global_env_ptr = self;
+
+        const _data = ThreadData{
+            // .messages = &messages,
+            .data = 0,
+            .messageQueue = messageQueue,
+            .plugins = &self.plugins,
+        };
+
+        // Test for another thread
+        const loop_thread = std.Thread.spawn(.{}, loop_test, .{_data}) catch @panic("testing");
+        loop_thread.detach();
 
         return self;
     }
@@ -342,12 +511,27 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
+        const plugins = ArrayList(Plugin).init(allocator);
+
+        // var messages = std.SinglyLinkedList(Message){};
+
+        const messageQueue = MessageQueue.initSPSC(allocator);
+
+        // TODO: How to handler async handler for non-root env case?
+        // const asyncHandler = messageQueue.spsc.wakeup;
+
         self.* = Self{
             .outer = outer,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable,
             .internalData = internalData,
+            // .plugins = &[_]Plugin{},
+            .plugins = plugins,
+            // .messages = &messages,
+            .messageQueue = messageQueue,
+            // .asyncHandler = asyncHandler,
+            .num = 0,
         };
 
         return self;

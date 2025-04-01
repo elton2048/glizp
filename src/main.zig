@@ -22,6 +22,9 @@ const LispEnv = @import("env.zig").LispEnv;
 const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
 
+const PluginExampleEmbedVtab = @import("plugin-example-embed-vtab.zig").PluginExampleEmbedVtab;
+const PluginExample = @import("plugin-example.zig").PluginExample;
+
 const INIT_CONFIG_FILE = "init.el";
 
 // NOTE: Shall be OS-dependent, to support different emoji it may require
@@ -116,6 +119,11 @@ pub fn main() !void {
 
     const shell = Shell.init(general_allocator, terminal);
 
+    const plugin1 = PluginExampleEmbedVtab.init(general_allocator);
+    const plugin2 = PluginExample.init(general_allocator);
+    shell.env.registerPlugin(plugin1) catch @panic("OOM");
+    shell.env.registerPlugin(plugin2) catch @panic("OOM");
+
     try shell.run();
 }
 
@@ -183,6 +191,9 @@ pub const Shell = struct {
         const frontend = terminal.frontend();
 
         const env = LispEnv.init_root(allocator);
+
+        // const plugin1 = PluginExampleEmbedVtab.init(allocator);
+        // env.registerPlugin(plugin1) catch @panic("OOM");
 
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{

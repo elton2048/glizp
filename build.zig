@@ -37,6 +37,12 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("regex", regex.module("regex"));
 
+    const xev = b.dependency("libxev", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("xev", xev.module("xev"));
+
     // Provides glizp module out, which makes glizp to be used as a library.
     const glizp_module = b.addModule("glizp", .{
         .root_source_file = b.path("src/lib.zig"),

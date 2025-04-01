@@ -141,6 +141,11 @@ pub const MalType = union(enum) {
     }
 };
 
+pub fn eq(x: *MalType, y: *MalType) bool {
+    // TODO: Comparing address seems not a good way for equality check...
+    return &x == &y;
+}
+
 const MalTypeContext = struct {
     pub fn hash(_: @This(), key: *MalType) u64 {
         return switch (key.*) {

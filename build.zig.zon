@@ -12,6 +12,10 @@
             .url = "../zig-regex",
             .hash = "1220b0c913700f12e0691d4fcf9773df8568e1a2e0b3a861282d9987bf2c834480f2",
         },
+        .libxev = .{
+            .url = "https://github.com/mitchellh/libxev/archive/94ed6af7b2aaaeab987fbf87fcee410063df715b.tar.gz",
+            .hash = "12207bbafd62d126bacad2444d9422fe51c9ac89aef662dbf66a228053722f27a0d6",
+        },
     },
     .paths = .{
         "",
