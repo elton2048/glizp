@@ -399,7 +399,7 @@ fn bytesToU32(bytes: []const u8) u32 {
 }
 
 fn u32ToBytes(str: []const u8) [4]u8 {
-    var byte_out = [4]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
+    var byte_out = [_]u8{u8_MAX} ** 4;
     for (str, 0..) |byte, i| {
         byte_out[i] = byte;
     }
@@ -407,6 +407,7 @@ fn u32ToBytes(str: []const u8) [4]u8 {
     return byte_out;
 }
 
+/// LEGACY function
 pub fn mapByteToKeyCode(byte: [4]u8) KeyError!KeyCode {
     const byte_u32 = bytesToU32(&byte);
 

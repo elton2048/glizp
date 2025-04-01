@@ -25,8 +25,11 @@ const Terminal = @import("terminal.zig").Terminal;
 const INIT_CONFIG_FILE = "init.el";
 
 // NOTE: Shall be OS-dependent, to support different emoji it may require
-// to be 8 too.
-const INPUT_BYTE_SIZE = 4;
+// to be u64 too.
+// TODO: Expand this elsewhere
+const BASE_BYTES_TYPE_FOR_KEY = u32;
+
+const INPUT_BYTE_SIZE = @sizeOf(BASE_BYTES_TYPE_FOR_KEY);
 
 // This isn't really an error case but a special case to be handled in
 // parsing byte
@@ -43,7 +46,7 @@ const Position = Frontend.Position;
 // Case: Arrow key (3 bytes)
 // Case: F5 (5 bytes)
 fn read(reader: std.fs.File.Reader) [INPUT_BYTE_SIZE]u8 {
-    var buffer = [INPUT_BYTE_SIZE]u8{ u8_MAX, u8_MAX, u8_MAX, u8_MAX };
+    var buffer = [_]u8{u8_MAX} ** INPUT_BYTE_SIZE;
 
     _ = reader.read(&buffer) catch |err| switch (err) {
         else => return buffer,
