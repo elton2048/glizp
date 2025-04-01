@@ -79,7 +79,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/testing_fs.zig"),
         .target = target,
         .optimize = optimize,
-        .test_runner = b.path("test_runner.zig"),
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
     });
 
     fs_tests.root_module.addImport("glizp", glizp_module);
@@ -92,7 +95,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/testing_lisp_general.zig"),
         .target = target,
         .optimize = optimize,
-        .test_runner = b.path("test_runner.zig"),
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
     });
 
     general_tests.root_module.addImport("glizp", glizp_module);
@@ -107,7 +113,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-        .test_runner = b.path("test_runner.zig"),
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
     });
 
     exe_unit_tests.root_module.addImport("logz", logz.module("logz"));
@@ -119,7 +128,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("./src/reader.zig"),
         .target = target,
         .optimize = optimize,
-        .test_runner = b.path("test_runner.zig"),
+        .test_runner = .{
+            .path = b.path("test_runner.zig"),
+            .mode = .simple,
+        },
     });
     reader_test.root_module.addImport("logz", logz.module("logz"));
     reader_test.root_module.addImport("regex", regex.module("regex"));
