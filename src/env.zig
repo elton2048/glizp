@@ -14,6 +14,7 @@ const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
 const LispFunctionWithEnv = lisp.LispFunctionWithEnv;
+const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
 const GenericLispFunction = lisp.GenericLispFunction;
 
 const MessageQueue = @import("message_queue.zig").MessageQueue;
@@ -22,7 +23,9 @@ const MessageQueue = @import("message_queue.zig").MessageQueue;
 const Plugin = @import("types/plugin.zig");
 const Message = @import("types/plugin.zig").Message;
 
-const PluginExample = @import("plugin-example.zig").PluginExample;
+const PluginHashMap = std.StringHashMap(Plugin);
+
+const STOCK_REFERENCE = "stock";
 
 /// Pointer to the global environment, this is required as the function signature
 /// is fixed for all LispFunction. And it is require to access the environment
@@ -68,6 +71,7 @@ pub const FunctionType = union(enum) {
 pub const FunctionWithAttributes = struct {
     type: FunctionType,
     func: GenericLispFunction,
+    reference: []const u8,
 };
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
@@ -297,44 +301,51 @@ pub const LispEnv = struct {
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
     // Internal storage for data parsed outside
     internalData: ArrayList(MalType),
-    plugins: ArrayList(Plugin),
-    // plugins: []Plugin,
-    // messages: *std.SinglyLinkedList(Message),
+    plugins: PluginHashMap,
     messageQueue: *MessageQueue,
-    // asyncHandler: xev.Async,
     num: u8,
 
     const Self = @This();
 
-    fn readFromStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunction)) void {
-        for (map.keys()) |key| {
-            const optional_func = map.get(key);
-            if (optional_func) |func| {
-                const value = FunctionWithAttributes{
+    fn generateFunctionWithAttributes(comptime T: type, func: T, reference: []const u8) FunctionWithAttributes {
+        var value: FunctionWithAttributes = undefined;
+        switch (T) {
+            LispFunction => {
+                value = .{
                     .type = .internal,
-                    .func = GenericLispFunction{ .simple = func },
+                    .func = .{ .simple = func },
+                    .reference = reference,
                 };
-
-                const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
-                defer baseTable.allocator.destroy(lispKey);
-
-                lispKey.* = MalType{
-                    .symbol = key,
+            },
+            LispFunctionWithEnv => {
+                value = .{
+                    .type = .internal,
+                    .func = .{ .with_env = func },
+                    .reference = reference,
                 };
-
-                baseTable.put(lispKey, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
-            }
+            },
+            LispFunctionWithOpaque => {
+                value = .{
+                    .type = .external,
+                    .func = .{ .plugin = func },
+                    .reference = reference,
+                };
+            },
+            else => @panic("Not implemented"),
         }
+
+        return value;
     }
 
-    fn readFromEnvStaticMap(baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(LispFunctionWithEnv)) void {
+    fn readFromFnMap(comptime T: type, baseTable: *lisp.LispHashMap(FunctionWithAttributes), map: std.StaticStringMap(T)) void {
         for (map.keys()) |key| {
             const optional_func = map.get(key);
             if (optional_func) |func| {
-                const value = FunctionWithAttributes{
-                    .type = .internal,
-                    .func = GenericLispFunction{ .with_env = func },
-                };
+                // NOTE: The plugin one will have stock reference too.
+                // Therefore plugin method is not using this method to
+                // register the function table map.
+                // Consider extract reference out?
+                const value = generateFunctionWithAttributes(T, func, STOCK_REFERENCE);
 
                 const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
                 defer baseTable.allocator.destroy(lispKey);
@@ -359,20 +370,12 @@ pub const LispEnv = struct {
     }
 
     const ThreadData = struct {
-        // messages: *std.SinglyLinkedList(Message),
         messageQueue: *MessageQueue,
-        plugins: *ArrayList(Plugin),
+        plugins: *PluginHashMap,
         data: u8,
-        // handler: *xev.Async,
     };
 
     fn loop_test(loopData: ThreadData) !void {
-        // _ = handler;
-        // var asyncHandler = xev.Async.init() catch @panic("testing");
-        // defer asyncHandler.deinit();
-
-        // var asyncHandler = _data.handler;
-
         var loop = try xev.Loop.init(.{});
         defer loop.deinit();
 
@@ -387,10 +390,10 @@ pub const LispEnv = struct {
                 completion: *xev.Completion,
                 result: xev.Async.WaitError!void,
             ) xev.CallbackAction {
-                // const inner_userdata: *ThreadData = @ptrCast(@alignCast(userdata.?));
                 const inner_userdata = userdata.?;
                 if (inner_userdata.messageQueue.getLastOrNull()) |item| {
-                    for (inner_userdata.plugins.items) |plugin| {
+                    var iter = inner_userdata.plugins.valueIterator();
+                    while (iter.next()) |plugin| {
                         plugin.subscribeEvent() catch @panic("plugin subscribeEvent");
                     }
 
@@ -405,8 +408,6 @@ pub const LispEnv = struct {
                 return .rearm;
             }
         }).callback);
-
-        // _data.handler.notify() catch @panic("testing");
 
         var c1: xev.Completion = undefined;
         loop.timer(&c1, time_interval, @constCast(&loopData), (struct {
@@ -440,17 +441,44 @@ pub const LispEnv = struct {
         try loop.run(.until_done);
     }
 
+    /// Register plugin. This will provide the environment data and message
+    /// queue to the plugin such that it allows the plugin to access such
+    /// information. The plugin shall implement its fnTable in
+    /// "std.StaticStringMap(LispFunctionWithOpaque)" type to denote
+    /// extra functions within the plugin.
+    /// The lisp functions denoted will be added into the lisp environment.
+    /// When these functions executeds, the corresponding plugin will be
+    /// pluged in, allowing data manipulation on the plugin.
+    /// TODO - Way to check if the plugin fulfills some requirement?
     pub fn registerPlugin(self: *Self, extension: anytype) !void {
-        // _ = self;
-        // _ = extension;
-
         // TODO: Any way to check the extension fulfilling the requirement?
         const plugin = Plugin.init(extension, &self.data, self.messageQueue);
 
-        // // const plugin = extension.plugin(&self.data, &self.messages);
-        self.plugins.append(plugin) catch |err| switch (err) {
+        std.debug.print("{s}\n", .{plugin.name});
+
+        self.plugins.put(plugin.name, plugin) catch |err| switch (err) {
             error.OutOfMemory => {},
         };
+
+        // Put the plugin functions in the lisp environment
+        // TODO: Extract as common function?
+        if (plugin.fnTable) |fnTable| {
+            for (fnTable.keys()) |key| {
+                const optional_func = fnTable.get(key);
+                if (optional_func) |func| {
+                    const value = generateFunctionWithAttributes(LispFunctionWithOpaque, func, plugin.name);
+
+                    const lispKey = self.allocator.create(MalType) catch @panic("OOM");
+                    defer self.allocator.destroy(lispKey);
+
+                    lispKey.* = MalType{
+                        .symbol = key,
+                    };
+
+                    self.fnTable.put(lispKey, value) catch @panic("Unexpected error when putting KV pair from static map to env map");
+                }
+            }
+        }
     }
 
     pub fn init_root(allocator: std.mem.Allocator) *Self {
@@ -461,13 +489,13 @@ pub const LispEnv = struct {
 
         const messageQueue = MessageQueue.initSPSC(allocator);
 
-        const plugins = ArrayList(Plugin).init(allocator);
+        const plugins = PluginHashMap.init(allocator);
 
         // Expected to modify the pointer through function to setup
         // initial function table.
         const fnTable = @constCast(&lisp.LispHashMap(FunctionWithAttributes).init(allocator));
-        readFromStaticMap(fnTable, data.EVAL_TABLE);
-        readFromEnvStaticMap(fnTable, SPECIAL_ENV_EVAL_TABLE);
+        readFromFnMap(LispFunction, fnTable, data.EVAL_TABLE);
+        readFromFnMap(LispFunctionWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE);
 
         const internalData = ArrayList(MalType).init(allocator);
 
@@ -478,9 +506,7 @@ pub const LispEnv = struct {
             .fnTable = fnTable.*,
             .internalData = internalData,
             .plugins = plugins,
-            // .messages = &messages,
             .messageQueue = messageQueue,
-            // .asyncHandler = asyncHandler,
             .num = 0,
         };
 
@@ -489,7 +515,6 @@ pub const LispEnv = struct {
         global_env_ptr = self;
 
         const _data = ThreadData{
-            // .messages = &messages,
             .data = 0,
             .messageQueue = messageQueue,
             .plugins = &self.plugins,
@@ -511,14 +536,9 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
-        const plugins = ArrayList(Plugin).init(allocator);
-
-        // var messages = std.SinglyLinkedList(Message){};
+        const plugins = PluginHashMap.init(allocator);
 
         const messageQueue = MessageQueue.initSPSC(allocator);
-
-        // TODO: How to handler async handler for non-root env case?
-        // const asyncHandler = messageQueue.spsc.wakeup;
 
         self.* = Self{
             .outer = outer,
@@ -526,11 +546,8 @@ pub const LispEnv = struct {
             .data = envData,
             .fnTable = fnTable,
             .internalData = internalData,
-            // .plugins = &[_]Plugin{},
             .plugins = plugins,
-            // .messages = &messages,
             .messageQueue = messageQueue,
-            // .asyncHandler = asyncHandler,
             .num = 0,
         };
 
@@ -560,6 +577,8 @@ pub const LispEnv = struct {
         try self.fnTable.put(lispKey, .{
             .func = inputValue,
             .type = .external,
+            // TODO: Set the corresponding reference
+            .reference = "",
         });
     }
 
@@ -574,6 +593,8 @@ pub const LispEnv = struct {
         try self.fnTable.put(lispKey, .{
             .func = inputValue,
             .type = .external,
+            // TODO: Set the corresponding reference
+            .reference = "",
         });
     }
 
@@ -777,10 +798,24 @@ pub const LispEnv = struct {
                 var fnValue: MalType = undefined;
                 switch (func) {
                     .simple => |simple_func| {
-                        fnValue = try @call(.auto, simple_func, .{params.items});
+                        fnValue = try @call(.auto, simple_func, .{
+                            params.items,
+                        });
                     },
                     .with_env => |env_func| {
-                        fnValue = try @call(.auto, env_func, .{ params.items, self });
+                        fnValue = try @call(.auto, env_func, .{
+                            params.items,
+                            self,
+                        });
+                    },
+                    .plugin => |plugin_func| {
+                        const reference = funcWithAttr.reference;
+                        const plugin = @constCast(self.plugins.get(reference).?.context);
+
+                        fnValue = try @call(.auto, plugin_func, .{
+                            params.items,
+                            plugin,
+                        });
                     },
                 }
 

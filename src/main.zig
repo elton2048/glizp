@@ -119,10 +119,8 @@ pub fn main() !void {
 
     const shell = Shell.init(general_allocator, terminal);
 
-    const plugin1 = PluginExampleEmbedVtab.init(general_allocator);
-    const plugin2 = PluginExample.init(general_allocator);
-    shell.env.registerPlugin(plugin1) catch @panic("OOM");
-    shell.env.registerPlugin(plugin2) catch @panic("OOM");
+    const plugin_example = PluginExample.init(general_allocator);
+    shell.env.registerPlugin(plugin_example) catch @panic("OOM");
 
     try shell.run();
 }

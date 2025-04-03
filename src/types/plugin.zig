@@ -1,5 +1,17 @@
+//! Plugin abstractation. This supports having additional functionality
+//! in the lisp environment, which separates the core function of an
+//! interpreter and different functions to work as a shell or editor
+//! like Terminal and Emacs.
+//!
+//! The plugin holds the fields separately, and by setting the function
+//! on "fnTable", it allows to use lisp-way to access such fields within
+//! the lisp environment.
+//! Check plugin-example.zig on how Plugin is created.
+//!
+//! TODO: Naming convention for the function; What if duplicate name occurs
 const std = @import("std");
 const MalType = @import("lisp.zig").MalType;
+const LispFunctionWithOpaque = @import("lisp.zig").LispFunctionWithOpaque;
 
 const LispEnv = @import("../env.zig").LispEnv;
 const MessageQueue = @import("../message_queue.zig").MessageQueue;
@@ -14,10 +26,14 @@ pub const Message = struct {
 context: *const anyopaque,
 /// Virtual table to store the function pointers on actual implementations.
 vtable: *const VTable,
+/// Name of the plugin
+name: []const u8,
 
 env: *std.StringHashMap(MalType),
-// messages: *std.SinglyLinkedList(*Message),
 queue: *MessageQueue,
+
+/// Function table key by string.
+fnTable: ?std.StaticStringMap(LispFunctionWithOpaque),
 
 pub const VTable = struct {
     subscribe: *const fn (context: *const anyopaque, *std.StringHashMap(MalType)) anyerror!void,
@@ -38,11 +54,17 @@ pub fn init(obj: anytype, env: *std.StringHashMap(MalType), messages: *MessageQu
     const Ptr = @TypeOf(obj);
     // const alignment = @typeInfo(Ptr).Pointer.alignment;
 
+    var name: []const u8 = "";
+    var it = std.mem.splitScalar(u8, @typeName(Ptr), '.');
+    while (it.next()) |str| {
+        name = str;
+    }
+
     const impl = struct {
         fn subscribe(context: *const anyopaque, inner_env: *std.StringHashMap(MalType)) !void {
             // _ = inner_env;
             // _ = context;
-            const self: Ptr = @constCast(@ptrCast(context));
+            const self: Ptr = @constCast(@ptrCast(@alignCast(context)));
 
             // self.vtable.subscribe(env) catch @panic("PLUGIn");
             const method_name = "sub";
@@ -57,10 +79,7 @@ pub fn init(obj: anytype, env: *std.StringHashMap(MalType), messages: *MessageQu
         }
 
         fn subscribeEvent(context: *const anyopaque, messageQueue: *MessageQueue) anyerror!void {
-            // _ = context;
-            // _ = inner_env;
-
-            const self: Ptr = @constCast(@ptrCast(context));
+            const self: Ptr = @constCast(@ptrCast(@alignCast(context)));
 
             const method_name = "subscribeEvent";
             if (@hasDecl(@TypeOf(self.*), method_name)) {
@@ -75,13 +94,14 @@ pub fn init(obj: anytype, env: *std.StringHashMap(MalType), messages: *MessageQu
     };
 
     return .{
+        .fnTable = obj.fnTable,
         .context = obj,
+        .name = name,
         .vtable = &.{
             .subscribe = impl.subscribe,
             .subscribeEvent = impl.subscribeEvent,
         },
         .env = env,
-        // .messages = messages,
         .queue = messages,
     };
 }
