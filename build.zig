@@ -37,6 +37,12 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("regex", regex.module("regex"));
 
+    const xev = b.dependency("libxev", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("xev", xev.module("xev"));
+
     // Provides glizp module out, which makes glizp to be used as a library.
     const glizp_module = b.addModule("glizp", .{
         .root_source_file = b.path("src/lib.zig"),
@@ -46,6 +52,7 @@ pub fn build(b: *std.Build) void {
 
     glizp_module.addImport("logz", logz.module("logz"));
     glizp_module.addImport("regex", regex.module("regex"));
+    glizp_module.addImport("xev", xev.module("xev"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -104,6 +111,7 @@ pub fn build(b: *std.Build) void {
     general_tests.root_module.addImport("glizp", glizp_module);
     general_tests.root_module.addImport("logz", logz.module("logz"));
     general_tests.root_module.addImport("regex", regex.module("regex"));
+    general_tests.root_module.addImport("xev", xev.module("xev"));
 
     const run_general_tests = b.addRunArtifact(general_tests);
 
@@ -121,6 +129,7 @@ pub fn build(b: *std.Build) void {
 
     exe_unit_tests.root_module.addImport("logz", logz.module("logz"));
     exe_unit_tests.root_module.addImport("regex", regex.module("regex"));
+    exe_unit_tests.root_module.addImport("xev", xev.module("xev"));
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
@@ -135,6 +144,7 @@ pub fn build(b: *std.Build) void {
     });
     reader_test.root_module.addImport("logz", logz.module("logz"));
     reader_test.root_module.addImport("regex", regex.module("regex"));
+    reader_test.root_module.addImport("xev", xev.module("xev"));
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request

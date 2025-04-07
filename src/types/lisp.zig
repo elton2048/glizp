@@ -12,9 +12,14 @@ pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
 
 pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
 
+/// For plugin purpose, the function shall allow to reference back
+/// to the plugin instance, which is denoted as *anyopaque.
+pub const LispFunctionWithOpaque = *const fn ([]MalType, *anyopaque) MalTypeError!MalType;
+
 pub const GenericLispFunction = union(enum) {
     simple: LispFunction,
     with_env: LispFunctionWithEnv,
+    plugin: LispFunctionWithOpaque,
 };
 
 pub const List = ArrayList(MalType);

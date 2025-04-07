@@ -22,6 +22,8 @@ const LispEnv = @import("env.zig").LispEnv;
 const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
 
+const PluginExample = @import("plugin-example.zig").PluginExample;
+
 const INIT_CONFIG_FILE = "init.el";
 
 // NOTE: Shall be OS-dependent, to support different emoji it may require
@@ -183,6 +185,9 @@ pub const Shell = struct {
         const frontend = terminal.frontend();
 
         const env = LispEnv.init_root(allocator);
+
+        const plugin_example = PluginExample.init(allocator);
+        env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
