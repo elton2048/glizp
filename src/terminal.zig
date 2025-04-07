@@ -251,6 +251,10 @@ pub const Terminal = struct {
             // .ICANON = true, // ICANON is disabled, requires manual handling
             .ECHO = false,
         };
+        prog_termios.oflag = posix.tc_oflag_t{
+            .OPOST = true,
+            .ONLCR = true,
+        };
 
         prog_termios.cc[cc_VMIN] = 0;
         prog_termios.cc[cc_VTIME] = 0;
