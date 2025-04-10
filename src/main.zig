@@ -23,6 +23,7 @@ const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
 
 const PluginExample = @import("plugin-example.zig").PluginExample;
+const PluginHistory = @import("plugin-history.zig").PluginHistory;
 
 const INIT_CONFIG_FILE = "init.el";
 
@@ -125,8 +126,6 @@ pub const Shell = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
 
-    history: ArrayList([]u8),
-    history_curr: usize,
     /// Denotes where the buffer cursor position is at to perform append
     /// and delete action from that point.
     buffer_pos: usize,
@@ -172,11 +171,6 @@ pub const Shell = struct {
 
         const stdin = std.io.getStdIn();
 
-        const historyArrayList = ArrayList([]u8).init(allocator);
-        // errdefer {
-        //     historyArrayList.deinit();
-        // }
-
         const config = allocator.create(ShellConfig) catch @panic("OOM");
         config.* = ShellConfig{
             .set = false,
@@ -189,12 +183,13 @@ pub const Shell = struct {
         const plugin_example = PluginExample.init(allocator);
         env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
+        const plugin_history = PluginHistory.init(allocator);
+        env.*.registerPlugin(plugin_history) catch @panic("OOM");
+
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
             .allocator = allocator,
             .stdin = stdin,
-            .history = historyArrayList,
-            .history_curr = 0,
             .logger = logger,
             .buffer_pos = 0,
             .buffer_cursor = Position{
@@ -287,6 +282,11 @@ pub const Shell = struct {
         const reader = stdin.reader();
         var reading = true;
 
+        var history_plugin: ?*PluginHistory = null;
+        if (self.*.env.plugins.get("PluginHistory")) |plugin| {
+            history_plugin = @constCast(@ptrCast(@alignCast(plugin.context)));
+        }
+
         while (reading) {
             if (parsing_byte(reader)) |inputEvent| {
                 self.logger.logger()
@@ -334,9 +334,12 @@ pub const Shell = struct {
                                 continue;
                             }
 
-                            try self.*.history.append(statement);
-                            // Reset history
-                            self.*.history_curr = self.*.history.items.len - 1;
+                            if (history_plugin) |plugin| {
+                                try plugin.history.append(statement);
+                                // Reset history
+                                plugin.history_curr = plugin.history.items.len - 1;
+                            }
+
                             // Reset cursor
                             self.buffer_pos = 0;
 
@@ -350,31 +353,38 @@ pub const Shell = struct {
                                     try self.*.clearLine(&arrayList);
                                 }
 
-                                const history_len = self.*.history.items.len;
-                                if (history_len == 0) {
-                                    continue;
-                                }
-
-                                // Return the next one
-                                if (key == .N) {
-                                    self.*.history_curr += 1;
-                                    if (self.*.history_curr == history_len) {
-                                        self.*.history_curr -= 1;
+                                if (history_plugin) |plugin| {
+                                    const history_len = plugin.history.items.len;
+                                    if (history_len == 0) {
                                         continue;
+                                    }
+
+                                    // Return the next one
+                                    if (key == .N) {
+                                        plugin.history_curr += 1;
+
+                                        if (plugin.history_curr == history_len) {
+                                            plugin.history_curr -= 1;
+                                            continue;
+                                        }
                                     }
                                 }
 
                                 self.buffer_pos = 0;
-                                const result = self.*.getHistoryItem(self.*.history_curr);
-                                for (result) |byte| {
-                                    try self.frontend.insert(&arrayList, byte, self.buffer_pos);
-                                    self.buffer_pos += 1;
-                                }
+                                if (history_plugin) |plugin| {
+                                    const result = plugin.getHistoryItem(plugin.history_curr);
 
+                                    for (result) |byte| {
+                                        try self.frontend.insert(&arrayList, byte, self.buffer_pos);
+                                        self.buffer_pos += 1;
+                                    }
+                                }
                                 // Set to the previous one
                                 if (key == .P) {
-                                    if (self.*.history_curr > 0) {
-                                        self.*.history_curr -= 1;
+                                    if (history_plugin) |plugin| {
+                                        if (plugin.history_curr > 0) {
+                                            plugin.history_curr -= 1;
+                                        }
                                     }
                                 }
                             }
@@ -431,10 +441,6 @@ pub const Shell = struct {
         }
 
         return arrayList.toOwnedSlice();
-    }
-
-    fn getHistoryItem(self: Shell, index: usize) []const u8 {
-        return self.history.items[index];
     }
 
     fn clearLine(self: *Shell, arrayList: *ArrayList(u8)) !void {
