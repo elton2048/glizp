@@ -308,6 +308,9 @@ pub const LispEnv = struct {
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
     // Internal storage for data parsed outside
     internalData: ArrayList(MalType),
+    // Data collection point which holds the reference, intends to be a
+    // garbage collector.
+    dataCollector: ArrayList(MalType),
     plugins: PluginHashMap,
     messageQueue: *MessageQueue,
 
@@ -374,6 +377,10 @@ pub const LispEnv = struct {
             item.deinit();
         }
         self.internalData.deinit();
+        for (self.dataCollector.items) |item| {
+            item.deinit();
+        }
+        self.dataCollector.deinit();
         self.allocator.destroy(self);
     }
 
@@ -488,12 +495,15 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
+        const dataCollector = ArrayList(MalType).init(allocator);
+
         self.* = Self{
             .outer = null,
             .allocator = allocator,
             .data = envData,
             .fnTable = fnTable.*,
             .internalData = internalData,
+            .dataCollector = dataCollector,
             .plugins = plugins,
             .messageQueue = messageQueue,
         };
@@ -524,6 +534,8 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
+        const dataCollector = ArrayList(MalType).init(allocator);
+
         const plugins = PluginHashMap.init(allocator);
 
         const messageQueue = MessageQueue.initSPSC(allocator);
@@ -534,6 +546,7 @@ pub const LispEnv = struct {
             .data = envData,
             .fnTable = fnTable,
             .internalData = internalData,
+            .dataCollector = dataCollector,
             .plugins = plugins,
             .messageQueue = messageQueue,
         };
@@ -650,7 +663,16 @@ pub const LispEnv = struct {
                 // handle afterwards? Then this is a simple GC job.
                 var iter = self.data.iterator();
                 while (iter.next()) |item| {
-                    defer item.value_ptr.deinit();
+                    switch (item.value_ptr.*) {
+                        .vector => {
+                            self.dataCollector.append(item.value_ptr.*) catch |err| switch (err) {
+                                else => return MalTypeError.Unhandled,
+                            };
+                        },
+                        else => {
+                            defer item.value_ptr.deinit();
+                        },
+                    }
                 }
 
                 return result;
@@ -739,7 +761,9 @@ pub const LispEnv = struct {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
-                        defer mal_param.deinit();
+                        self.dataCollector.append(mal_param) catch |err| switch (err) {
+                            else => return MalTypeError.Unhandled,
+                        };
 
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
