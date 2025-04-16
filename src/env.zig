@@ -20,6 +20,8 @@ const GenericLispFunction = lisp.GenericLispFunction;
 
 const MessageQueue = @import("message_queue.zig").MessageQueue;
 
+const PrefixStringHashMap = @import("prefix-string-hash-map.zig").PrefixStringHashMap;
+
 const Plugin = @import("types/plugin.zig");
 
 const PluginHashMap = std.StringHashMap(Plugin);
@@ -179,8 +181,10 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
 
     const bindings = try binding_arg.as_list();
 
+    // NOTE: All envs are now deinit along with the root one.
+    // The init function hooks the env back to the new one, which allows
+    // newly created env to be accessed by the root.
     const newEnv = LispEnv.init(env.allocator, env);
-    defer newEnv.deinit();
 
     for (bindings.items) |binding| {
         // NOTE: Using list for binding
@@ -235,7 +239,7 @@ fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const inner_fn = struct {
         pub fn func(_params: []MalType, _env: *LispEnv) MalTypeError!MalType {
             // NOTE: deinit the LispEnv when it is done
-            defer _env.deinit();
+            // defer _env.deinit();
 
             // NOTE: deinit for the statement is controlled in applyList
             // function
@@ -302,6 +306,8 @@ fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
 }
 
 pub const LispEnv = struct {
+    // Inner reference, used for root to deinit all environments.
+    inner: ?*LispEnv,
     outer: ?*LispEnv,
     allocator: std.mem.Allocator,
     data: std.StringHashMap(MalType),
@@ -310,11 +316,13 @@ pub const LispEnv = struct {
     internalData: ArrayList(MalType),
     // Data collection point which holds the reference, intends to be a
     // garbage collector.
-    dataCollector: ArrayList(MalType),
+    dataCollector: PrefixStringHashMap(MalType),
     plugins: PluginHashMap,
     messageQueue: *MessageQueue,
 
     const Self = @This();
+
+    const dataCollectorKeyPrefix = "__data-collector";
 
     fn generateFunctionWithAttributes(comptime T: type, func: T, reference: []const u8) FunctionWithAttributes {
         var value: FunctionWithAttributes = undefined;
@@ -370,15 +378,42 @@ pub const LispEnv = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        // Deinit the env. Note that it is likely means it is for root
+        // case.
+        // For lambda function, it returns the Lisp object with function
+        // type, which holds the env, as a result this makes the deinit
+        // of the type conflicts, as a result disable the corresponding case.
+        var inner_env = self.inner;
+        while (inner_env) |env| {
+            defer env.deinit();
+
+            inner_env = env.inner;
+            env.inner = null;
+        }
+
         self.messageQueue.deinit();
+        var dataIter = self.data.iterator();
+        while (dataIter.next()) |item| {
+            // For lambda variables, they are deinit within the function.
+            if (!std.mem.eql(u8, item.key_ptr.*, LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY)) {
+                item.value_ptr.deinit();
+            }
+        }
         self.data.deinit();
+
         self.fnTable.deinit();
         for (self.internalData.items) |item| {
             item.deinit();
         }
         self.internalData.deinit();
-        for (self.dataCollector.items) |item| {
-            item.deinit();
+        var iter = self.dataCollector.iterator();
+        while (iter.next()) |item| {
+            // Only free those with implicit keys. i.e. not created from user
+            // directly
+            if (std.mem.startsWith(u8, item.key_ptr.*, dataCollectorKeyPrefix)) {
+                self.allocator.free(item.key_ptr.*);
+            }
+            item.value_ptr.deinit();
         }
         self.dataCollector.deinit();
         self.allocator.destroy(self);
@@ -495,9 +530,10 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
-        const dataCollector = ArrayList(MalType).init(allocator);
+        const dataCollector = PrefixStringHashMap(MalType).init(allocator, dataCollectorKeyPrefix);
 
         self.* = Self{
+            .inner = null,
             .outer = null,
             .allocator = allocator,
             .data = envData,
@@ -534,13 +570,14 @@ pub const LispEnv = struct {
 
         const internalData = ArrayList(MalType).init(allocator);
 
-        const dataCollector = ArrayList(MalType).init(allocator);
+        const dataCollector = PrefixStringHashMap(MalType).init(allocator, dataCollectorKeyPrefix);
 
         const plugins = PluginHashMap.init(allocator);
 
         const messageQueue = MessageQueue.initSPSC(allocator);
 
         self.* = Self{
+            .inner = null,
             .outer = outer,
             .allocator = allocator,
             .data = envData,
@@ -550,6 +587,8 @@ pub const LispEnv = struct {
             .plugins = plugins,
             .messageQueue = messageQueue,
         };
+
+        outer.inner = self;
 
         return self;
     }
@@ -661,20 +700,6 @@ pub const LispEnv = struct {
                 // for now.
                 // TODO: Should keep such value within the env and further
                 // handle afterwards? Then this is a simple GC job.
-                var iter = self.data.iterator();
-                while (iter.next()) |item| {
-                    switch (item.value_ptr.*) {
-                        .vector => {
-                            self.dataCollector.append(item.value_ptr.*) catch |err| switch (err) {
-                                else => return MalTypeError.Unhandled,
-                            };
-                        },
-                        else => {
-                            defer item.value_ptr.deinit();
-                        },
-                    }
-                }
-
                 return result;
             },
             .symbol => |symbol| {
@@ -755,16 +780,34 @@ pub const LispEnv = struct {
             } else
 
             // TODO: Simple and lazy way for checking "special" form
+            if (std.hash_map.eqlString(fnName, "def!")) {
+                switch (_mal) {
+                    .list => {
+                        // TODO: Need more assertion
+                        // Assume the return type fits with the function
+                        mal_param = try self.apply(_mal);
+
+                        if (mal_param == .Incompleted) {
+                            return MalTypeError.IllegalType;
+                        }
+                    },
+                    else => {
+                        mal_param = _mal;
+                    },
+                }
+            } else
+
+            // TODO: Simple and lazy way for checking "special" form
             if (SPECIAL_ENV_EVAL_TABLE.has(fnName)) {
                 switch (_mal) {
                     .list => {
                         // TODO: Need more assertion
                         // Assume the return type fits with the function
                         mal_param = try self.apply(_mal);
-                        self.dataCollector.append(mal_param) catch |err| switch (err) {
+
+                        self.dataCollector.put(mal_param) catch |err| switch (err) {
                             else => return MalTypeError.Unhandled,
                         };
-
                         if (mal_param == .Incompleted) {
                             return MalTypeError.IllegalType;
                         }
@@ -831,7 +874,10 @@ pub const LispEnv = struct {
                 }
 
                 if (!lambda_func_run_checker) {
-                    defer fnValue.deinit();
+                    // Put the item into data collector for garbage collection
+                    self.dataCollector.put(fnValue) catch |err| switch (err) {
+                        else => return MalTypeError.Unhandled,
+                    };
                 }
 
                 return fnValue;
