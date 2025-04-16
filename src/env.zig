@@ -44,6 +44,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // TODO: See if need to extract this out?
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
+    .{ "aref", &arefFunc },
 
     // NOTE: lread.c in original Emacs
     // Original "load" function includes to read and execute a file of Lisp code
@@ -98,6 +99,27 @@ fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         },
     };
     return vectorLikeFunc(result);
+}
+
+fn arefFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const array = get(params, env) catch |err| switch (err) {
+        error.IllegalType => blk: {
+            break :blk params[0];
+        },
+        else => {
+            return err;
+        },
+    };
+    const vector = try array.as_vector();
+    const index = try params[1].as_number();
+
+    var result: MalType = MalType{ .boolean = false };
+
+    if (index.value < vector.items.len) {
+        result = vector.items[index.value];
+    }
+
+    return result;
 }
 
 fn messageAppend(params: []MalType, env: *LispEnv) MalTypeError!MalType {
