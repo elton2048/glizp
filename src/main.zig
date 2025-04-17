@@ -208,6 +208,9 @@ pub const Shell = struct {
 
         self.logConfig();
 
+        // TODO: For keymap, consider provide default value
+        self.eval_statement("(load \"global-keymap.lisp\")", false);
+
         return self;
     }
 
@@ -231,11 +234,12 @@ pub const Shell = struct {
     fn eval_statement(self: Shell, statement: []const u8, print: bool) void {
         const statement_reader = parsing_statement(statement);
 
+        // TODO: Handle deinit the result
         const result = self.env.apply(statement_reader.ast_root) catch |err| {
             utils.log("ERR", err);
             return;
         };
-        defer result.deinit();
+        // defer result.deinit();
 
         if (print) {
             const str = printer.pr_str(result, true);
@@ -243,6 +247,20 @@ pub const Shell = struct {
         }
 
         return;
+    }
+
+    fn eval_statement_and_return(self: Shell, statement: []const u8) []u8 {
+        const statement_reader = parsing_statement(statement);
+
+        // TODO: Handle deinit the result
+        const result = self.env.apply(statement_reader.ast_root) catch |err| {
+            utils.log("ERRR", err);
+            return "";
+        };
+        // defer result.deinit();
+
+        const str = printer.pr_str(result, true);
+        return str;
     }
 
     fn loadInitConfigFile(self: *Shell) !void {
@@ -310,6 +328,12 @@ pub const Shell = struct {
             editing_plugin = @constCast(@ptrCast(@alignCast(plugin.context)));
         }
 
+        // To implement keymap feature, it is required to load keymap-related
+        // feature, when key is read, it searches through the corresponding
+        // keymap, and execute the function through the env (self.env.apply)
+        // Flow: A -> [insert] -> eval("(insert "A")")
+        // Flow: Transfer key to definition -> get keymap result -> eval
+        // e.g. ^[[D -> bind to "left" -> (left . move-backward) -> eval(move-backward)
         while (reading) {
             var plugin_full_statement = editing_plugin.?.buffer;
             if (parsing_byte(reader)) |inputEvent| {
@@ -428,18 +452,30 @@ pub const Shell = struct {
                             }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                if (editing_plugin) |plugin| {
-                                    try plugin.insert(editing_plugin.?.pos, byte);
-                                }
+                                const aref_statement = try std.fmt.allocPrint(self.allocator, "(aref keymap {d})", .{byte});
+                                const result_statement = self.eval_statement_and_return(aref_statement);
+                                // Skip for nil
+                                // TODO: Provide a way to insert params for function
+                                // require params like insert.
+                                if (!std.mem.eql(u8, result_statement, "nil")) {
+                                    const final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
+                                        result_statement,
+                                        byte,
+                                    });
 
-                                try self.frontend.insert(null, byte, editing_plugin.?.pos);
-                                editing_plugin.?.moveForward(1);
+                                    self.eval_statement(final_statement, false);
+                                    // In general this may not be the case
+                                    // as not all are insert function
+                                    // Consider refresh the frontend in general
+                                    try self.frontend.insert(null, byte, editing_plugin.?.pos - 1);
+                                }
                             }
                         }
                     },
                     .functional => |key| {
                         // NOTE: Restrict for left and right only. No function
                         // yet on buffer.
+                        // NOTE: Resize frame case is not yet handled
                         if (key == .ArrowLeft) {
                             if (editing_plugin.?.pos > 0) {
                                 try self.frontend.move(1, .Left);

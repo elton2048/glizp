@@ -16,15 +16,16 @@ const EVAL_TABLE = std.StaticStringMap(LispFunctionWithOpaque).initComptime(.{
 
 fn insert(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const bytes = try params[0].as_string();
-    const pos = try params[1].as_number();
 
     const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
 
     for (bytes.items) |byte| {
-        pluginEnv.insert(pos.value, byte) catch |err| switch (err) {
+        pluginEnv.insert(pluginEnv.pos, byte) catch |err| switch (err) {
             else => return MalTypeError.Unhandled,
         };
     }
+
+    pluginEnv.moveForward(1);
 
     // Corresponds to nil
     // TODO: See if extract this as a new type like Qnil.
@@ -59,6 +60,10 @@ pub const PluginEditing = struct {
         const result = try self.buffer.insert(pos, byte);
 
         return result;
+    }
+
+    pub fn append(self: *PluginEditing, byte: u8) !void {
+        return try self.buffer.append(byte);
     }
 
     pub fn reset(self: *PluginEditing) void {
