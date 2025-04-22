@@ -70,6 +70,7 @@ pub const Terminal = struct {
         .deleteBackwardChar = deleteBackwardChar,
         .readCursorPos = _readCursorPos,
         .clearContent = clearContent,
+        .refresh = refresh,
     };
 
     /// Move function by a number of steps in certain direction.
@@ -135,6 +136,7 @@ pub const Terminal = struct {
         };
     }
 
+    /// DEPRECATED. Use refresh for a general layout update purpose.
     /// Insert byte on the frontend as well as the optional underlying
     /// array list for the string on particular pos.
     fn insert(context: *const anyopaque, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: usize) !void {
@@ -189,6 +191,7 @@ pub const Terminal = struct {
 
     // }
 
+    /// DEPRECATED. Use refresh for a general layout update purpose.
     fn deleteBackwardChar(context: *const anyopaque, pos: usize) !void {
         const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
 
@@ -268,6 +271,57 @@ pub const Terminal = struct {
         try stdout_writer.print("{s}", .{string});
 
         try bw.flush(); // don't forget to flush
+
+    /// Refresh the frontend layout.
+    /// Instruction:
+    /// DONE: Insert some character: refresh(context, 3, 0, "insert");
+    /// DONE: Delete one character: refresh(context, 3, 1, "");
+    /// TODO: Replace some character; Replace two chars to be re: refresh(context, 3, 2, "re");
+    fn refresh(context: *const anyopaque, posStart: usize, charbefore: usize, modification: ?[]const u8) !void {
+        const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
+
+        if (self.buffer.items.len == 0 and posStart == 0 and charbefore > 0) {
+            return;
+        }
+        // Modify the underlying buffer
+        _ = try self.buffer.replaceRange(posStart, charbefore, modification.?);
+
+        const stdout_file = self.stdout.writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout_writer = bw.writer();
+
+        {
+            var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+            const allocator = temp_allocator.allocator();
+
+            if (charbefore > 0) {
+                for (0..charbefore) |_| {
+                    // terminal display; assume to be in raw mode
+                    try stdout_writer.writeByte('\u{0008}');
+                    try stdout_writer.writeByte('\u{0020}');
+                    try stdout_writer.writeByte('\u{0008}');
+                }
+            }
+
+            // For refactor insert case; Try to combine the remove case logic
+            {
+                const steps = self.buffer.items.len - posStart + charbefore - 1;
+                if (steps > 0) {
+                    try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
+                }
+
+                try stdout_writer.writeAll(self.buffer.items[posStart..]);
+
+                if (steps > 0) {
+                    const moveStatement = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+                    defer allocator.free(moveStatement);
+
+                    try stdout_writer.writeAll(moveStatement);
+                }
+            }
+
+            try bw.flush();
+        }
     }
 
     // TODO: Better structure for interface functions

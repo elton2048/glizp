@@ -360,7 +360,7 @@ pub const Shell = struct {
                                 }
 
                                 if (_editing_plugin.pos > 0) {
-                                    try self.frontend.deleteBackwardChar(_editing_plugin.pos);
+                                    try self.frontend.refresh(_editing_plugin.pos - 1, 1, "");
                                     _editing_plugin.orderedRemove(_editing_plugin.pos - 1);
                                     _editing_plugin.moveBackward(1);
                                 }
@@ -372,8 +372,7 @@ pub const Shell = struct {
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
-                            // NOTE: Need to handle \n byte better
-                            try self.frontend.insert(null, '\n', editing_plugin.?.pos);
+                            try self.frontend.refresh(editing_plugin.?.buffer.items.len, 0, &[_]u8{'\n'});
                             reading = false;
 
                             // TODO(#42): Parsing the latest statement and store
@@ -383,7 +382,8 @@ pub const Shell = struct {
                             // for this.
                             self.*.curr_read = parsing_statement(statement);
 
-                            try self.frontend.clearContent(editing_plugin.?.pos);
+                            // +1 for the last newline char
+                            try self.frontend.refresh(0, editing_plugin.?.buffer.items.len + 1, "");
 
                             if (statement.len == 0) {
                                 continue;
@@ -405,6 +405,9 @@ pub const Shell = struct {
                             // navigating function run before.
                             if (key == .N or key == .P) {
                                 if (plugin_full_statement.items.len != 0) {
+                                    // NOTE: For clearContent, keeps as a
+                                    // separate function now as to generalize to be
+                                    // refresh is complicated
                                     try self.frontend.clearContent(editing_plugin.?.pos);
                                     editing_plugin.?.clear();
                                 }
@@ -432,8 +435,10 @@ pub const Shell = struct {
                                     for (result) |byte| {
                                         if (editing_plugin) |_editing_plugin| {
                                             try _editing_plugin.insert(_editing_plugin.pos, byte);
-                                            try self.frontend.insert(null, byte, _editing_plugin.pos);
+
                                             _editing_plugin.moveForward(1);
+
+                                            try self.frontend.refresh(editing_plugin.?.pos - 1, 0, &[_]u8{byte});
                                         }
                                     }
                                 }
@@ -464,10 +469,7 @@ pub const Shell = struct {
                                     });
 
                                     self.eval_statement(final_statement, false);
-                                    // In general this may not be the case
-                                    // as not all are insert function
-                                    // Consider refresh the frontend in general
-                                    try self.frontend.insert(null, byte, editing_plugin.?.pos - 1);
+                                    try self.frontend.refresh(editing_plugin.?.pos - 1, 0, &[_]u8{byte});
                                 }
                             }
                         }
