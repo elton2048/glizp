@@ -333,6 +333,40 @@ test "list function  - multiple type case" {
     try testing.expectEqualStrings("(1 2 \"1\")", result);
 }
 
+test "listp function - truthy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var listp_statement = Reader.init(allocator, "(listp (list 1 2))");
+    defer listp_statement.deinit();
+
+    try testing.expect(listp_statement.ast_root == .list);
+
+    const listp_statement_value = try env.apply(listp_statement.ast_root);
+
+    const result = printer.pr_str(listp_statement_value, true);
+    try testing.expectEqualStrings("t", result);
+}
+
+test "listp function - falsy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var listp_statement = Reader.init(allocator, "(listp nil)");
+    defer listp_statement.deinit();
+
+    try testing.expect(listp_statement.ast_root == .list);
+
+    const listp_statement_value = try env.apply(listp_statement.ast_root);
+
+    const result = printer.pr_str(listp_statement_value, true);
+    try testing.expectEqualStrings("nil", result);
+}
+
 test "[] syntax to create vector - simple case" {
     const allocator = testing.allocator;
 
