@@ -367,6 +367,25 @@ test "listp function - falsy case" {
     try testing.expectEqualStrings("nil", result);
 }
 
+test "count function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var count_statement = Reader.init(allocator, "(count (list 1 2 \"1\"))");
+    defer count_statement.deinit();
+
+    try testing.expect(count_statement.ast_root == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const count_statement_value = try env.apply(count_statement.ast_root);
+    defer count_statement_value.deinit();
+
+    const result = printer.pr_str(count_statement_value, true);
+    try testing.expectEqualStrings("3", result);
+}
+
 test "[] syntax to create vector - simple case" {
     const allocator = testing.allocator;
 
