@@ -344,28 +344,8 @@ pub const Shell = struct {
 
                 switch (inputEvent.key) {
                     .char => |key| {
-                        if (inputEvent.ctrl and key == .D) {
-                            reading = false;
-
-                            // TODO: Prevent using error to handle this?
-                            return ByteParsingError.EndOfStream;
-                        }
-
-                        // Backspace handling
-                        if (key == .Backspace) {
-                            // TODO: Functional key instead?
-                            if (editing_plugin) |_editing_plugin| {
-                                if (_editing_plugin.buffer.items.len == 0) {
-                                    continue;
-                                }
-
-                                if (_editing_plugin.pos > 0) {
-                                    try self.frontend.refresh(_editing_plugin.pos - 1, 1, "");
-                                    _editing_plugin.orderedRemove(_editing_plugin.pos - 1);
-                                    _editing_plugin.moveBackward(1);
-                                }
-                            }
-                        } else if (inputEvent.ctrl and key == .J) {
+                        // New entry point
+                        if (inputEvent.ctrl and key == .J) {
                             var copied_statement = try plugin_full_statement.clone();
                             defer copied_statement.deinit();
                             statement = try copied_statement.toOwnedSlice();
@@ -382,8 +362,7 @@ pub const Shell = struct {
                             // for this.
                             self.*.curr_read = parsing_statement(statement);
 
-                            // +1 for the last newline char
-                            try self.frontend.refresh(0, editing_plugin.?.buffer.items.len + 1, "");
+                            try self.frontend.clearContent(0);
 
                             if (statement.len == 0) {
                                 continue;
@@ -452,24 +431,57 @@ pub const Shell = struct {
                                 }
                             }
                         } else {
-                            if (inputEvent.ctrl) {
-                                continue;
-                            }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
                                 const aref_statement = try std.fmt.allocPrint(self.allocator, "(aref keymap {d})", .{byte});
                                 const result_statement = self.eval_statement_and_return(aref_statement);
                                 // Skip for nil
-                                // TODO: Provide a way to insert params for function
-                                // require params like insert.
+                                // TODO: Mechanism to determine whether params is required
+                                // e.g. insert function.
+                                // For a simple approach, use basic if clause checking
+                                // TODO: frontend update should be done on the
+                                // function directly? Require structural change
+                                // Decide the frontend refresh params directly now for simplicity
                                 if (!std.mem.eql(u8, result_statement, "nil")) {
-                                    const final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
-                                        result_statement,
-                                        byte,
-                                    });
+                                    var final_statement: []u8 = undefined;
+                                    var posStart: ?usize = undefined;
+                                    var charbefore: usize = undefined;
+                                    var modification: []const u8 = undefined;
+
+                                    if (std.mem.eql(u8, result_statement, "insert")) {
+                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
+                                            result_statement,
+                                            byte,
+                                        });
+                                        posStart = editing_plugin.?.pos;
+                                        charbefore = 0;
+                                        modification = &[_]u8{byte};
+                                    } else {
+                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s})", .{
+                                            result_statement,
+                                        });
+
+                                        if (std.mem.eql(u8, result_statement, "delete-char")) {
+                                            posStart = if (editing_plugin.?.pos >= 0) editing_plugin.?.pos else null;
+                                            charbefore = 1;
+                                            modification = "";
+                                        } else if (std.mem.eql(u8, result_statement, "delete-backward-char")) {
+                                            if (editing_plugin.?.pos > 0) {
+                                                try self.frontend.move(1, .Left);
+                                            }
+                                            posStart = if (editing_plugin.?.pos > 0) editing_plugin.?.pos - 1 else null;
+                                            charbefore = 1;
+                                            modification = "";
+                                        }
+                                    }
 
                                     self.eval_statement(final_statement, false);
-                                    try self.frontend.refresh(editing_plugin.?.pos - 1, 0, &[_]u8{byte});
+                                    // TODO: Hardcoded for refresh the layout,
+                                    // filtered out impossible case, mainly for
+                                    // delete-char case
+                                    if (posStart) |_posStart| {
+                                        try self.frontend.refresh(_posStart, charbefore, modification);
+                                    }
                                 }
                             }
                         }

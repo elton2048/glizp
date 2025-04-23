@@ -280,7 +280,9 @@ pub const Terminal = struct {
     fn refresh(context: *const anyopaque, posStart: usize, charbefore: usize, modification: ?[]const u8) !void {
         const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
 
-        if (self.buffer.items.len == 0 and posStart == 0 and charbefore > 0) {
+        if (charbefore > 0 and
+            self.buffer.items.len == posStart)
+        {
             return;
         }
         // Modify the underlying buffer
@@ -294,19 +296,12 @@ pub const Terminal = struct {
             var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
             const allocator = temp_allocator.allocator();
 
-            if (charbefore > 0) {
-                for (0..charbefore) |_| {
-                    // terminal display; assume to be in raw mode
-                    try stdout_writer.writeByte('\u{0008}');
-                    try stdout_writer.writeByte('\u{0020}');
-                    try stdout_writer.writeByte('\u{0008}');
-                }
-            }
-
             // For refactor insert case; Try to combine the remove case logic
             {
                 const steps = self.buffer.items.len - posStart + charbefore - 1;
-                if (steps > 0) {
+                // HARDCODED: Filter out newline case now, as it is now
+                // used as interactive env
+                if (!std.mem.containsAtLeast(u8, modification.?, 1, "\n")) {
                     try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
                 }
 

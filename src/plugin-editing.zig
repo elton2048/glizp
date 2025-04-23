@@ -12,6 +12,9 @@ const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
 
 const EVAL_TABLE = std.StaticStringMap(LispFunctionWithOpaque).initComptime(.{
     .{ "insert", &insert },
+    .{ "delete-char", &deleteChar },
+    // Shortcut now. The original implementation are in elisp.
+    .{ "delete-backward-char", &deleteBackwardChar },
 });
 
 fn insert(params: []MalType, env: *anyopaque) MalTypeError!MalType {
@@ -29,6 +32,50 @@ fn insert(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     // Corresponds to nil
     // TODO: See if extract this as a new type like Qnil.
+    return MalType{ .boolean = false };
+}
+
+fn deleteChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+    const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
+
+    if (pluginEnv.buffer.items.len > 0 and
+        pluginEnv.pos < pluginEnv.buffer.items.len)
+    {
+        var len: lisp.Number = undefined;
+
+        if (params.len > 0) {
+            len = params[0].as_number() catch |err| switch (err) {
+                else => .{ .value = 1 },
+            };
+        } else {
+            len = .{ .value = 1 };
+        }
+
+        pluginEnv.replace(pluginEnv.pos, len.value, &.{});
+        // pluginEnv.moveBackward(1);
+    }
+
+    return MalType{ .boolean = false };
+}
+
+fn deleteBackwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+    const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
+
+    if (pluginEnv.buffer.items.len > 0 and pluginEnv.pos > 0) {
+        var len: lisp.Number = undefined;
+
+        if (params.len > 0) {
+            len = params[0].as_number() catch |err| switch (err) {
+                else => .{ .value = 1 },
+            };
+        } else {
+            len = .{ .value = 1 };
+        }
+
+        pluginEnv.replace(pluginEnv.pos - 1, len.value, &.{});
+        pluginEnv.moveBackward(1);
+    }
+
     return MalType{ .boolean = false };
 }
 
@@ -81,6 +128,10 @@ pub const PluginEditing = struct {
     pub fn clear(self: *PluginEditing) void {
         self.pos = 0;
         return self.buffer.clearRetainingCapacity();
+    }
+
+    pub fn replace(self: *PluginEditing, start: usize, len: usize, new_items: []const u8) void {
+        self.buffer.replaceRangeAssumeCapacity(start, len, new_items);
     }
 
     pub fn orderedRemove(self: *PluginEditing, pos: usize) void {
