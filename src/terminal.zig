@@ -271,6 +271,7 @@ pub const Terminal = struct {
         try stdout_writer.print("{s}", .{string});
 
         try bw.flush(); // don't forget to flush
+    }
 
     /// Refresh the frontend layout.
     /// Instruction:

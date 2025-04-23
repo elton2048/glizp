@@ -184,7 +184,7 @@ pub const Shell = struct {
         const plugin_history = PluginHistory.init(allocator);
         env.*.registerPlugin(plugin_history) catch @panic("OOM");
 
-        const plugin_editing = PluginEditing.init(allocator);
+        const plugin_editing = PluginEditing.init(allocator, frontend);
         env.*.registerPlugin(plugin_editing) catch @panic("OOM");
 
         const self = allocator.create(Shell) catch @panic("OOM");
@@ -439,49 +439,21 @@ pub const Shell = struct {
                                 // TODO: Mechanism to determine whether params is required
                                 // e.g. insert function.
                                 // For a simple approach, use basic if clause checking
-                                // TODO: frontend update should be done on the
-                                // function directly? Require structural change
-                                // Decide the frontend refresh params directly now for simplicity
                                 if (!std.mem.eql(u8, result_statement, "nil")) {
                                     var final_statement: []u8 = undefined;
-                                    var posStart: ?usize = undefined;
-                                    var charbefore: usize = undefined;
-                                    var modification: []const u8 = undefined;
 
                                     if (std.mem.eql(u8, result_statement, "insert")) {
                                         final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
                                             result_statement,
                                             byte,
                                         });
-                                        posStart = editing_plugin.?.pos;
-                                        charbefore = 0;
-                                        modification = &[_]u8{byte};
                                     } else {
                                         final_statement = try std.fmt.allocPrint(self.allocator, "({s})", .{
                                             result_statement,
                                         });
-
-                                        if (std.mem.eql(u8, result_statement, "delete-char")) {
-                                            posStart = if (editing_plugin.?.pos >= 0) editing_plugin.?.pos else null;
-                                            charbefore = 1;
-                                            modification = "";
-                                        } else if (std.mem.eql(u8, result_statement, "delete-backward-char")) {
-                                            if (editing_plugin.?.pos > 0) {
-                                                try self.frontend.move(1, .Left);
-                                            }
-                                            posStart = if (editing_plugin.?.pos > 0) editing_plugin.?.pos - 1 else null;
-                                            charbefore = 1;
-                                            modification = "";
-                                        }
                                     }
 
                                     self.eval_statement(final_statement, false);
-                                    // TODO: Hardcoded for refresh the layout,
-                                    // filtered out impossible case, mainly for
-                                    // delete-char case
-                                    if (posStart) |_posStart| {
-                                        try self.frontend.refresh(_posStart, charbefore, modification);
-                                    }
                                 }
                             }
                         }
@@ -492,26 +464,14 @@ pub const Shell = struct {
                         // NOTE: Resize frame case is not yet handled
                         if (key == .ArrowLeft) {
                             if (editing_plugin.?.pos > 0) {
-                                try self.frontend.move(1, .Left);
-
-                                editing_plugin.?.moveBackward(1);
+                                self.eval_statement("(backward-char)", false);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;
                             }
                         } else if (key == .ArrowRight) {
                             if (editing_plugin.?.pos < plugin_full_statement.items.len) {
-                                const prevCursor = try self.frontend.readCursorPos();
-
-                                if (prevCursor.x == self.frontend.frame_size.x) {
-                                    // Handle the case when cursor is at the end of window
-                                    try self.frontend.move(prevCursor.x - 1, .Left);
-                                    try self.frontend.move(1, .Down);
-                                } else {
-                                    try self.frontend.move(1, .Right);
-                                }
-
-                                editing_plugin.?.moveForward(1);
+                                self.eval_statement("(forward-char)", false);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;
