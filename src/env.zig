@@ -44,6 +44,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "if", &ifFunc },
     .{ "lambda", &lambdaFunc },
     // TODO: See if need to extract this out?
+    .{ "list", &listFunc },
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
     .{ "aref", &arefFunc },
@@ -75,6 +76,19 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    var list = ArrayList(MalType).init(env.allocator);
+
+    for (params) |param| {
+        const mal_item = param.clone();
+        list.append(mal_item) catch @panic("test");
+    }
+
+    const mal = MalType{ .list = list };
+
+    return mal;
+}
 
 fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     var vector = ArrayList(MalType).init(env.allocator);
