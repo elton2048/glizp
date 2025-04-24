@@ -46,6 +46,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // TODO: See if need to extract this out?
     .{ "list", &listFunc },
     .{ "listp", &isListFunc },
+    .{ "emptyp", &isEmptyFunc },
     .{ "count", &countFunc },
 
     .{ "vector", &vectorFunc },
@@ -106,6 +107,29 @@ fn isListFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         },
     };
     return listLikeFunc(result);
+}
+
+// NOTE: See if support vector case
+fn isEmptyFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const isList = try (try isListFunc(params, env)).as_boolean();
+
+    if (isList) {
+        const mal = get(params, env) catch |err| switch (err) {
+            error.IllegalType => blk: {
+                break :blk params[0];
+            },
+            else => {
+                return err;
+            },
+        };
+
+        const list = try mal.as_list();
+        const empty = list.items.len == 0;
+
+        return .{ .boolean = empty };
+    }
+
+    return .{ .boolean = false };
 }
 
 fn countFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {

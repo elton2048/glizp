@@ -367,6 +367,40 @@ test "listp function - falsy case" {
     try testing.expectEqualStrings("nil", result);
 }
 
+test "emptyp function - truthy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var emptyp_statement = Reader.init(allocator, "(emptyp (list))");
+    defer emptyp_statement.deinit();
+
+    try testing.expect(emptyp_statement.ast_root == .list);
+
+    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root);
+
+    const result = printer.pr_str(emptyp_statement_value, true);
+    try testing.expectEqualStrings("t", result);
+}
+
+test "emptyp function - falsy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var emptyp_statement = Reader.init(allocator, "(emptyp (list 1))");
+    defer emptyp_statement.deinit();
+
+    try testing.expect(emptyp_statement.ast_root == .list);
+
+    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root);
+
+    const result = printer.pr_str(emptyp_statement_value, true);
+    try testing.expectEqualStrings("nil", result);
+}
+
 test "count function" {
     const allocator = testing.allocator;
 
