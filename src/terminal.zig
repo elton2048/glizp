@@ -1,10 +1,23 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const ArrayList = std.ArrayList;
 
 const utils = @import("utils.zig");
 
+extern "c" fn setsid() std.c.pid_t;
+const c = switch (builtin.os.tag) {
+    .macos => @cImport({
+        @cInclude("sys/ioctl.h"); // ioctl and constants
+        @cInclude("util.h"); // openpty()
+    }),
+    else => @cImport({
+        @cInclude("sys/ioctl.h"); // ioctl and constants
+        // @cInclude("pty.h");
+    }),
+};
 // TODO: Provide check for termios based on OS
 const posix = std.posix;
+const Fd = posix.fd_t;
 
 const cc_VTIME = 5;
 const cc_VMIN = 6;
@@ -245,21 +258,46 @@ pub const Terminal = struct {
     // FIXME: enableRawMode could only be run within init now as it will
     // keeps the I/O busy s.t. the shell is struck.
     fn enableRawMode(self: Terminal) !void {
+        // Based on Ghostty for termios setting
+        var master_fd: Fd = undefined;
+        var slave_fd: Fd = undefined;
+        if (c.openpty(
+            &master_fd,
+            &slave_fd,
+            null,
+            null,
+            null,
+        ) < 0)
+            return error.OpenptyFailed;
+
+        var attrs: c.termios = undefined;
+        if (c.tcgetattr(master_fd, &attrs) != 0)
+            return error.OpenptyFailed;
+
+        // NOTE: Shall we reset and set all flags?
+        attrs.c_iflag = 0;
+        // attrs.c_oflag = 0;
+        // attrs.c_cflag = 0;
+        // attrs.c_lflag = 0;
+
+        attrs.c_iflag |= c.BRKINT;
+        attrs.c_iflag |= c.ICRNL;
+        attrs.c_iflag |= c.IXON;
+        attrs.c_iflag |= c.IXANY;
+        attrs.c_iflag |= c.IMAXBEL;
+        attrs.c_iflag |= c.IUTF8;
+
+        // Disable ICANON flag; Disable canonical mode
+        // As the terminal requires to handle input immediately rather
+        // than line by line.
+        attrs.c_lflag ^= c.ICANON;
+        // Disable ECHO flag; Don't echo input characters
+        attrs.c_lflag ^= c.ECHO;
+
+        // attrs.c_cc = self.prog_termios.cc;
         const stdin_fd = self.stdin_fd;
-        var prog_termios = self.prog_termios;
-        prog_termios.lflag = posix.tc_lflag_t{
-            // .ICANON = true, // ICANON is disabled, requires manual handling
-            .ECHO = false,
-        };
-        prog_termios.oflag = posix.tc_oflag_t{
-            .OPOST = true,
-            .ONLCR = true,
-        };
-
-        prog_termios.cc[cc_VMIN] = 0;
-        prog_termios.cc[cc_VTIME] = 0;
-
-        posix.tcsetattr(stdin_fd.*, .NOW, prog_termios.*) catch @panic("Cannot access termios");
+        if (c.tcsetattr(stdin_fd.*, c.TCSANOW, &attrs) != 0)
+            return error.OpenptyFailed;
     }
 
     /// Unset raw mode in the terminal.
