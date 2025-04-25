@@ -35,6 +35,10 @@ pub const Terminal = struct {
 
     stdout: std.fs.File,
 
+    /// Latest buffer shown in the terminal side, the actual buffer
+    /// comes from backend/shell side
+    buffer: ArrayList(u8),
+
     /// Terminal escape control statement
     /// Move cursor up by {d} lines
     const TERM_MOVE_CURSOR_UP = "\x1b[{d}A";
@@ -65,6 +69,7 @@ pub const Terminal = struct {
         .insert = insert,
         .deleteBackwardChar = deleteBackwardChar,
         .readCursorPos = _readCursorPos,
+        .clearContent = clearContent,
     };
 
     /// Move function by a number of steps in certain direction.
@@ -133,16 +138,22 @@ pub const Terminal = struct {
     /// Insert byte on the frontend as well as the optional underlying
     /// array list for the string on particular pos.
     fn insert(context: *const anyopaque, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: usize) !void {
-        const self: *const Terminal = @ptrCast(@alignCast(context));
+        _ = optional_arrayList;
+        const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
 
-        if (optional_arrayList) |arrayList| {
-            try arrayList.insert(pos, byte);
-        }
         const stdout_file = self.stdout.writer();
         var bw = std.io.bufferedWriter(stdout_file);
         const stdout_writer = bw.writer();
 
-        if (optional_arrayList) |arrayList| {
+        // TEMP: For newline case, default to insert at the end for
+        // easier handling; The pos reserves for moving only.
+        if (byte == '\n') {
+            try self.buffer.insert(self.buffer.items.len, byte);
+        } else {
+            try self.buffer.insert(pos, byte);
+        }
+
+        {
             var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
             const allocator = temp_allocator.allocator();
 
@@ -154,18 +165,16 @@ pub const Terminal = struct {
                 // Clear the line
                 try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
             }
-            try stdout_writer.writeAll(arrayList.items);
+            try stdout_writer.writeAll(self.buffer.items);
 
             // Adjust the cursor if necessary
-            const steps = arrayList.items.len - pos - 1;
+            const steps = self.buffer.items.len - pos - 1;
             if (steps > 0) {
                 const adjust_move = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
                 defer allocator.free(adjust_move);
 
                 try stdout_writer.writeAll(adjust_move);
             }
-        } else {
-            try stdout_writer.writeByte(byte);
         }
         try bw.flush();
     }
@@ -180,15 +189,16 @@ pub const Terminal = struct {
 
     // }
 
-    fn deleteBackwardChar(context: *const anyopaque, optional_arrayList: ?*ArrayList(u8), pos: usize) !void {
-        const self: *const Terminal = @ptrCast(@alignCast(context));
+    fn deleteBackwardChar(context: *const anyopaque, pos: usize) !void {
+        const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
 
         const charIndex = pos - 1;
 
+        _ = self.buffer.orderedRemove(charIndex);
         // Erase the previous byte
-        if (optional_arrayList) |arrayList| {
-            _ = arrayList.*.orderedRemove(charIndex);
-        }
+        // if (optional_arrayList) |arrayList| {
+        //     _ = arrayList.*.orderedRemove(charIndex);
+        // }
 
         const stdout_file = self.stdout.writer();
         var bw = std.io.bufferedWriter(stdout_file);
@@ -199,15 +209,17 @@ pub const Terminal = struct {
         try stdout_writer.writeByte('\u{0020}');
         try stdout_writer.writeByte('\u{0008}');
 
-        if (optional_arrayList) |arrayList| {
+        {
             var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
             const allocator = temp_allocator.allocator();
 
             // Adjustment for the string after cursor
-            const steps = arrayList.items.len - charIndex;
+            // const steps = arrayList.items.len - charIndex;
+            const steps = self.buffer.items.len - charIndex;
             if (steps > 0) {
                 try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
-                try stdout_writer.writeAll(arrayList.items[charIndex..]);
+                // try stdout_writer.writeAll(arrayList.items[charIndex..]);
+                try stdout_writer.writeAll(self.buffer.items[charIndex..]);
 
                 const moveStatement = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
                 defer allocator.free(moveStatement);
@@ -215,6 +227,34 @@ pub const Terminal = struct {
                 try stdout_writer.writeAll(moveStatement);
             }
         }
+
+        try bw.flush();
+    }
+
+    fn clearContent(context: *const anyopaque, pos: usize) !void {
+        const self: *Terminal = @constCast(@ptrCast(@alignCast(context)));
+
+        const stdout_file = self.stdout.writer();
+        var bw = std.io.bufferedWriter(stdout_file);
+        const stdout_writer = bw.writer();
+
+        var temp_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+        const allocator = temp_allocator.allocator();
+
+        // const charIndex = pos - 1;
+
+        // Adjustment for the string after cursor
+        // const steps = self.buffer.items.len - charIndex;
+        const steps = pos;
+
+        if (steps > 0) {
+            const moveStatement = std.fmt.allocPrint(allocator, TERM_MOVE_CURSOR_LEFT, .{steps}) catch unreachable;
+            defer allocator.free(moveStatement);
+            try stdout_writer.writeAll(moveStatement);
+
+            try stdout_writer.writeAll(TERM_ERASE_FROM_CURSOR);
+        }
+        self.buffer.shrinkRetainingCapacity(0);
 
         try bw.flush();
     }
@@ -309,6 +349,7 @@ pub const Terminal = struct {
 
     pub fn init(allocator: std.mem.Allocator) *Terminal {
         const self = allocator.create(Terminal) catch @panic("OOM");
+        const buffer = ArrayList(u8).init(allocator);
         const stdin = std.io.getStdIn();
         const stdin_fd = stdin.handle;
 
@@ -318,6 +359,7 @@ pub const Terminal = struct {
 
         self.* = Terminal{
             .allocator = allocator,
+            .buffer = buffer,
             .stdin = stdin,
             .stdin_fd = &stdin_fd,
             .orig_termios = orig_termios,

@@ -23,6 +23,8 @@ const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
 
 const PluginExample = @import("plugin-example.zig").PluginExample;
+const PluginHistory = @import("plugin-history.zig").PluginHistory;
+const PluginEditing = @import("plugin-editing.zig").PluginEditing;
 
 const INIT_CONFIG_FILE = "init.el";
 
@@ -125,11 +127,6 @@ pub const Shell = struct {
     allocator: std.mem.Allocator,
     stdin: std.fs.File,
 
-    history: ArrayList([]u8),
-    history_curr: usize,
-    /// Denotes where the buffer cursor position is at to perform append
-    /// and delete action from that point.
-    buffer_pos: usize,
     /// Denotes the buffer cursor.
     buffer_cursor: Position,
     /// Current reader instance
@@ -172,11 +169,6 @@ pub const Shell = struct {
 
         const stdin = std.io.getStdIn();
 
-        const historyArrayList = ArrayList([]u8).init(allocator);
-        // errdefer {
-        //     historyArrayList.deinit();
-        // }
-
         const config = allocator.create(ShellConfig) catch @panic("OOM");
         config.* = ShellConfig{
             .set = false,
@@ -189,14 +181,17 @@ pub const Shell = struct {
         const plugin_example = PluginExample.init(allocator);
         env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
+        const plugin_history = PluginHistory.init(allocator);
+        env.*.registerPlugin(plugin_history) catch @panic("OOM");
+
+        const plugin_editing = PluginEditing.init(allocator);
+        env.*.registerPlugin(plugin_editing) catch @panic("OOM");
+
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
             .allocator = allocator,
             .stdin = stdin,
-            .history = historyArrayList,
-            .history_curr = 0,
             .logger = logger,
-            .buffer_pos = 0,
             .buffer_cursor = Position{
                 .x = 0,
                 .y = 0,
@@ -231,6 +226,25 @@ pub const Shell = struct {
         self.config.set = true;
     }
 
+    /// Eval statement directly, worked as a macro
+    // TODO: Consider adding error handling
+    fn eval_statement(self: Shell, statement: []const u8, print: bool) void {
+        const statement_reader = parsing_statement(statement);
+
+        const result = self.env.apply(statement_reader.ast_root) catch |err| {
+            utils.log("ERR", err);
+            return;
+        };
+        defer result.deinit();
+
+        if (print) {
+            const str = printer.pr_str(result, true);
+            utils.log("EVAL", str);
+        }
+
+        return;
+    }
+
     fn loadInitConfigFile(self: *Shell) !void {
         const load_statement = std.fmt.comptimePrint("(load \"{s}\")", .{INIT_CONFIG_FILE});
         const load_statement_reader = parsing_statement(load_statement);
@@ -257,16 +271,19 @@ pub const Shell = struct {
         var current_gpa = std.heap.GeneralPurposeAllocator(.{}){};
         const current_gpa_allocator = current_gpa.allocator();
 
+        // TODO: Consider making reading statement and parsing separated.(#42)
         const read_result = try self.*.read(current_gpa_allocator);
 
         try self.*.eval(self.curr_read.ast_root);
         // try self.*.print(read_result);
 
-        current_gpa_allocator.free(read_result);
+        _ = read_result;
+        // current_gpa_allocator.free(read_result);
     }
 
     // read from stdin and store the result via provided allocator.
     fn read(self: *Shell, allocator: std.mem.Allocator) ![]const u8 {
+        _ = allocator;
         // NOTE: The reading from stdin is now having two writer for different
         // ends. One is for stdout to display; Another is Arraylist to store
         // the string. Is this a good way to handle?
@@ -276,18 +293,25 @@ pub const Shell = struct {
 
         try self.frontend.print("\nuser> ");
 
-        var arrayList = ArrayList(u8).init(allocator);
-        errdefer {
-            arrayList.deinit();
-        }
-
         // TODO: Some mechanism to get the frontend input(generic way)
         // for parsing
         const stdin = self.*.stdin;
         const reader = stdin.reader();
         var reading = true;
+        var statement: []u8 = "";
+
+        var history_plugin: ?*PluginHistory = null;
+        if (self.*.env.plugins.get("PluginHistory")) |plugin| {
+            history_plugin = @constCast(@ptrCast(@alignCast(plugin.context)));
+        }
+
+        var editing_plugin: ?*PluginEditing = null;
+        if (self.*.env.plugins.get("PluginEditing")) |plugin| {
+            editing_plugin = @constCast(@ptrCast(@alignCast(plugin.context)));
+        }
 
         while (reading) {
+            var plugin_full_statement = editing_plugin.?.buffer;
             if (parsing_byte(reader)) |inputEvent| {
                 self.logger.logger()
                     .fmt("[LOG]", "InputEvent: {any}", .{inputEvent})
@@ -306,39 +330,49 @@ pub const Shell = struct {
                         // Backspace handling
                         if (key == .Backspace) {
                             // TODO: Functional key instead?
-                            if (arrayList.items.len == 0) {
-                                continue;
-                            }
+                            if (editing_plugin) |_editing_plugin| {
+                                if (_editing_plugin.buffer.items.len == 0) {
+                                    continue;
+                                }
 
-                            try self.frontend.deleteBackwardChar(&arrayList, self.buffer_pos);
-                            if (self.buffer_pos > 0) {
-                                self.buffer_pos -= 1;
+                                if (_editing_plugin.pos > 0) {
+                                    try self.frontend.deleteBackwardChar(_editing_plugin.pos);
+                                    _editing_plugin.orderedRemove(_editing_plugin.pos - 1);
+                                    _editing_plugin.moveBackward(1);
+                                }
                             }
                         } else if (inputEvent.ctrl and key == .J) {
-                            const statement = try arrayList.toOwnedSlice();
+                            var copied_statement = try plugin_full_statement.clone();
+                            defer copied_statement.deinit();
+                            statement = try copied_statement.toOwnedSlice();
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
                             // NOTE: Need to handle \n byte better
-                            try self.frontend.insert(null, '\n', self.buffer_pos);
+                            try self.frontend.insert(null, '\n', editing_plugin.?.pos);
                             reading = false;
 
-                            // TODO: Parsing the latest statement and store
+                            // TODO(#42): Parsing the latest statement and store
                             // in the Shell within the function. This makes
                             // function non-pure such that it makes testing
                             // more difficult. Need a more modular approach
                             // for this.
                             self.*.curr_read = parsing_statement(statement);
 
+                            try self.frontend.clearContent(editing_plugin.?.pos);
+
                             if (statement.len == 0) {
                                 continue;
                             }
 
-                            try self.*.history.append(statement);
-                            // Reset history
-                            self.*.history_curr = self.*.history.items.len - 1;
+                            if (history_plugin) |plugin| {
+                                try plugin.history.append(statement);
+                                // Reset history
+                                plugin.history_curr = plugin.history.items.len - 1;
+                            }
+
                             // Reset cursor
-                            self.buffer_pos = 0;
+                            editing_plugin.?.clear();
 
                             continue;
                         } else if (inputEvent.alt) {
@@ -346,35 +380,45 @@ pub const Shell = struct {
                             // points to the last one if there is no history
                             // navigating function run before.
                             if (key == .N or key == .P) {
-                                if (arrayList.items.len != 0) {
-                                    try self.*.clearLine(&arrayList);
+                                if (plugin_full_statement.items.len != 0) {
+                                    try self.frontend.clearContent(editing_plugin.?.pos);
+                                    editing_plugin.?.clear();
                                 }
 
-                                const history_len = self.*.history.items.len;
-                                if (history_len == 0) {
-                                    continue;
-                                }
-
-                                // Return the next one
-                                if (key == .N) {
-                                    self.*.history_curr += 1;
-                                    if (self.*.history_curr == history_len) {
-                                        self.*.history_curr -= 1;
+                                if (history_plugin) |plugin| {
+                                    const history_len = plugin.history.items.len;
+                                    if (history_len == 0) {
                                         continue;
+                                    }
+
+                                    // Return the next one
+                                    if (key == .N) {
+                                        plugin.history_curr += 1;
+
+                                        if (plugin.history_curr == history_len) {
+                                            plugin.history_curr -= 1;
+                                            continue;
+                                        }
                                     }
                                 }
 
-                                self.buffer_pos = 0;
-                                const result = self.*.getHistoryItem(self.*.history_curr);
-                                for (result) |byte| {
-                                    try self.frontend.insert(&arrayList, byte, self.buffer_pos);
-                                    self.buffer_pos += 1;
-                                }
+                                if (history_plugin) |plugin| {
+                                    const result = plugin.getHistoryItem(plugin.history_curr);
 
+                                    for (result) |byte| {
+                                        if (editing_plugin) |_editing_plugin| {
+                                            try _editing_plugin.insert(_editing_plugin.pos, byte);
+                                            try self.frontend.insert(null, byte, _editing_plugin.pos);
+                                            _editing_plugin.moveForward(1);
+                                        }
+                                    }
+                                }
                                 // Set to the previous one
                                 if (key == .P) {
-                                    if (self.*.history_curr > 0) {
-                                        self.*.history_curr -= 1;
+                                    if (history_plugin) |plugin| {
+                                        if (plugin.history_curr > 0) {
+                                            plugin.history_curr -= 1;
+                                        }
                                     }
                                 }
                             }
@@ -384,8 +428,12 @@ pub const Shell = struct {
                             }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                try self.frontend.insert(&arrayList, byte, self.buffer_pos);
-                                self.buffer_pos += 1;
+                                if (editing_plugin) |plugin| {
+                                    try plugin.insert(editing_plugin.?.pos, byte);
+                                }
+
+                                try self.frontend.insert(null, byte, editing_plugin.?.pos);
+                                editing_plugin.?.moveForward(1);
                             }
                         }
                     },
@@ -393,16 +441,16 @@ pub const Shell = struct {
                         // NOTE: Restrict for left and right only. No function
                         // yet on buffer.
                         if (key == .ArrowLeft) {
-                            if (self.buffer_pos > 0) {
+                            if (editing_plugin.?.pos > 0) {
                                 try self.frontend.move(1, .Left);
 
-                                self.buffer_pos -= 1;
+                                editing_plugin.?.moveBackward(1);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;
                             }
                         } else if (key == .ArrowRight) {
-                            if (self.buffer_pos < arrayList.items.len) {
+                            if (editing_plugin.?.pos < plugin_full_statement.items.len) {
                                 const prevCursor = try self.frontend.readCursorPos();
 
                                 if (prevCursor.x == self.frontend.frame_size.x) {
@@ -413,7 +461,7 @@ pub const Shell = struct {
                                     try self.frontend.move(1, .Right);
                                 }
 
-                                self.buffer_pos += 1;
+                                editing_plugin.?.moveForward(1);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;
@@ -424,26 +472,9 @@ pub const Shell = struct {
             } else |err| switch (err) {
                 else => |e| return e,
             }
-
-            logz.debug()
-                .fmt("[CURSOR]", "length: {d}", .{self.buffer_pos})
-                .log();
         }
 
-        return arrayList.toOwnedSlice();
-    }
-
-    fn getHistoryItem(self: Shell, index: usize) []const u8 {
-        return self.history.items[index];
-    }
-
-    fn clearLine(self: *Shell, arrayList: *ArrayList(u8)) !void {
-        // TODO: Provide efficient way for this one
-        for (0..arrayList.items.len) |_| {
-            try self.frontend.deleteBackwardChar(arrayList, self.buffer_pos);
-
-            self.buffer_pos -= 1;
-        }
+        return statement;
     }
 
     fn eval(self: *Shell, item: MalType) !void {

@@ -44,10 +44,13 @@ pub const VTable = struct {
     /// TODO: For multiple bytes case it is incorrect now, like emoji input.
     /// This is handled using CHARPOS and BYTEPOS in Emacs, which helps mapping
     /// to the correct position.
-    deleteBackwardChar: *const fn (context: int_ptr, optional_arrayList: ?*ArrayList(u8), pos: usize) anyerror!void,
+    deleteBackwardChar: *const fn (context: int_ptr, pos: usize) anyerror!void,
 
     /// Read current position of the cursor in Position form.
     readCursorPos: *const fn (context: int_ptr) anyerror!Position,
+
+    /// Clear content stored in the frontend
+    clearContent: *const fn (context: *const anyopaque, pos: usize) anyerror!void,
 };
 
 pub fn print(self: Self, string: []const u8) !void {
@@ -66,12 +69,16 @@ pub fn insert(self: Self, optional_arrayList: ?*ArrayList(u8), byte: u8, pos: us
     try self.vtable.insert(self.context, optional_arrayList, byte, pos);
 }
 
-pub fn deleteBackwardChar(self: Self, optional_arrayList: ?*ArrayList(u8), pos: usize) !void {
-    try self.vtable.deleteBackwardChar(self.context, optional_arrayList, pos);
+pub fn deleteBackwardChar(self: Self, pos: usize) !void {
+    try self.vtable.deleteBackwardChar(self.context, pos);
 }
 
 pub fn readCursorPos(self: Self) !Position {
     return try self.vtable.readCursorPos(self.context);
+}
+
+pub fn clearContent(self: Self, pos: usize) !void {
+    return self.vtable.clearContent(self.context, pos);
 }
 
 const Self = @This();
