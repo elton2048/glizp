@@ -5,6 +5,7 @@ const lisp = @import("types/lisp.zig");
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
+const NumberType = lisp.NumberType;
 
 // TODO: Parser part
 pub const EVAL_TABLE = std.StaticStringMap(LispFunction).initComptime(.{
@@ -41,7 +42,7 @@ fn eqlsign(params: []MalType) MalTypeError!MalType {
 /// number VAL.  2 <= NARGS.  Check that the remaining arguments are
 /// numbers or markers.
 fn arith_driver(oper: ARITHMETIC_OPERATION, params: []MalType, val: MalType) MalTypeError!MalType {
-    var accum: u64 = if (val.as_number()) |num| num.value else |_| {
+    var accum: NumberType = if (val.as_number()) |num| num.value else |_| {
         return MalTypeError.IllegalType;
     };
 
@@ -51,26 +52,19 @@ fn arith_driver(oper: ARITHMETIC_OPERATION, params: []MalType, val: MalType) Mal
         // TODO: Some assertion for the data?
         switch (oper) {
             .add => {
-                accum = std.math.add(u64, accum, num.value) catch |err| switch (err) {
-                    error.Overflow => return MalTypeError.Unhandled,
-                };
+                accum = accum + num.value;
             },
             .sub => {
-                accum = std.math.sub(u64, accum, num.value) catch |err| switch (err) {
-                    error.Overflow => return MalTypeError.Unhandled,
-                };
+                accum = accum - num.value;
             },
             .mult => {
-                accum = std.math.mul(u64, accum, num.value) catch |err| switch (err) {
-                    error.Overflow => return MalTypeError.Unhandled,
-                };
+                accum = accum * num.value;
             },
             .div => {
-                accum = std.math.divExact(u64, accum, num.value) catch |err| switch (err) {
-                    // TODO: Qarith_error in Emacs case
-                    error.DivisionByZero => return MalTypeError.Unhandled,
-                    error.UnexpectedRemainder => return MalTypeError.Unhandled,
-                };
+                if (num.value == 0) {
+                    return MalTypeError.ArithError;
+                }
+                accum = accum / num.value;
             },
             // else => return MalTypeError.IllegalType,
         }
@@ -80,25 +74,21 @@ fn arith_driver(oper: ARITHMETIC_OPERATION, params: []MalType, val: MalType) Mal
 }
 
 fn plus(params: []MalType) MalTypeError!MalType {
-    // TODO: Support integer only now
     const first = params[0];
     return arith_driver(.add, params, first);
 }
 
 fn minus(params: []MalType) MalTypeError!MalType {
-    // TODO: Support integer only now
     const first = params[0];
     return arith_driver(.sub, params, first);
 }
 
 fn times(params: []MalType) MalTypeError!MalType {
-    // TODO: Support integer only now
     const first = params[0];
     return arith_driver(.mult, params, first);
 }
 
 fn quo(params: []MalType) MalTypeError!MalType {
-    // TODO: Support integer only now
     const first = params[0];
     return arith_driver(.div, params, first);
 }
@@ -151,7 +141,7 @@ test "data - arith" {
     try expectEqual(2, (try quo1.as_number()).value);
 
     if (quo(@constCast(&param4_0))) |_| unreachable else |err| {
-        try (std.testing.expectEqual(MalTypeError.Unhandled, err));
+        try (std.testing.expectEqual(MalTypeError.ArithError, err));
     }
 
     const eqlsign_equal = try eqlsign(@constCast(&param0_same));

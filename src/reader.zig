@@ -345,7 +345,7 @@ pub const Reader = struct {
         if (isNumber) {
             mal = MalType{
                 .number = .{
-                    .value = utils.parseU64(token, 10) catch @panic("Unexpected overflow."),
+                    .value = std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."),
                 },
             };
         } else if (isBoolean) |mal_bool| {
