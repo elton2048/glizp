@@ -1,4 +1,7 @@
 const std = @import("std");
+
+const logz = @import("logz");
+
 const token_reader = @import("reader.zig");
 const lisp = @import("types/lisp.zig");
 
@@ -13,7 +16,9 @@ pub const EVAL_TABLE = std.StaticStringMap(LispFunction).initComptime(.{
     .{ "-", &minus },
     .{ "*", &times },
     .{ "/", &quo },
-    // TODO: In Emacs it uses general arithcompare_driver function
+    // The original arithcompare function store the three comparing cases
+    // into three bits(less than/great than/equal) and masking the bit
+    // return the result by given the corresponding opeartions.
     .{ "=", &eqlsign },
 });
 
