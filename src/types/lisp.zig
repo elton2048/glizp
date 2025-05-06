@@ -75,9 +75,11 @@ pub const MalType = union(enum) {
                 }
                 vector.deinit();
             },
-            .function => |func_with_env| {
-                func_with_env.deinit();
-            },
+            // NOTE: Using the root env to deinit, but it seems a bit
+            // magical?
+            // .function => |func_with_env| {
+            //     func_with_env.deinit();
+            // },
             else => {},
         }
     }

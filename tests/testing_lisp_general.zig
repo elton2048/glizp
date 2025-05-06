@@ -333,6 +333,25 @@ test "vector function - simple case" {
     try testing.expectEqualStrings("[1 2]", result);
 }
 
+test "vector function - simple symbol case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var vector_statement = Reader.init(allocator, "(vector a)");
+    defer vector_statement.deinit();
+
+    try testing.expect(vector_statement.ast_root == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    defer vector_statement_value.deinit();
+
+    const result = printer.pr_str(vector_statement_value, true);
+    try testing.expectEqualStrings("[a]", result);
+}
+
 test "vectorp function - truthy case" {
     const allocator = testing.allocator;
 
@@ -386,6 +405,45 @@ test "vectorp function - through let* to create variable case" {
 
     const is_vector_var_statement_value_bool = is_vector_var_statement_value.as_boolean() catch unreachable;
     try testing.expectEqual(true, is_vector_var_statement_value_bool);
+}
+
+test "aref function - direct get from vector constructor" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var aref_statement = Reader.init(allocator, "(aref [1 2 3] 1)");
+    defer aref_statement.deinit();
+
+    try testing.expect(aref_statement.ast_root == .list);
+
+    const aref_statement_value = try env.apply(aref_statement.ast_root);
+
+    const result = printer.pr_str(aref_statement_value, true);
+    try testing.expectEqualStrings("2", result);
+}
+
+test "aref function - get from variable" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var def_statement = Reader.init(allocator, "(def! a [1 2 3])");
+    defer def_statement.deinit();
+
+    _ = try env.apply(def_statement.ast_root);
+
+    var aref_statement = Reader.init(allocator, "(aref a 1)");
+    defer aref_statement.deinit();
+
+    try testing.expect(aref_statement.ast_root == .list);
+
+    const aref_statement_value = try env.apply(aref_statement.ast_root);
+
+    const result = printer.pr_str(aref_statement_value, true);
+    try testing.expectEqualStrings("2", result);
 }
 
 test "fs-load function - normal case" {

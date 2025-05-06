@@ -184,7 +184,7 @@ pub const Shell = struct {
         const plugin_history = PluginHistory.init(allocator);
         env.*.registerPlugin(plugin_history) catch @panic("OOM");
 
-        const plugin_editing = PluginEditing.init(allocator);
+        const plugin_editing = PluginEditing.init(allocator, frontend);
         env.*.registerPlugin(plugin_editing) catch @panic("OOM");
 
         const self = allocator.create(Shell) catch @panic("OOM");
@@ -207,6 +207,9 @@ pub const Shell = struct {
         self.initConfig();
 
         self.logConfig();
+
+        // TODO: For keymap, consider provide default value
+        self.eval_statement("(load \"global-keymap.lisp\")", false);
 
         return self;
     }
@@ -231,11 +234,12 @@ pub const Shell = struct {
     fn eval_statement(self: Shell, statement: []const u8, print: bool) void {
         const statement_reader = parsing_statement(statement);
 
+        // TODO: Handle deinit the result
         const result = self.env.apply(statement_reader.ast_root) catch |err| {
             utils.log("ERR", err);
             return;
         };
-        defer result.deinit();
+        // defer result.deinit();
 
         if (print) {
             const str = printer.pr_str(result, true);
@@ -243,6 +247,20 @@ pub const Shell = struct {
         }
 
         return;
+    }
+
+    fn eval_statement_and_return(self: Shell, statement: []const u8) []u8 {
+        const statement_reader = parsing_statement(statement);
+
+        // TODO: Handle deinit the result
+        const result = self.env.apply(statement_reader.ast_root) catch |err| {
+            utils.log("ERRR", err);
+            return "";
+        };
+        // defer result.deinit();
+
+        const str = printer.pr_str(result, true);
+        return str;
     }
 
     fn loadInitConfigFile(self: *Shell) !void {
@@ -310,6 +328,12 @@ pub const Shell = struct {
             editing_plugin = @constCast(@ptrCast(@alignCast(plugin.context)));
         }
 
+        // To implement keymap feature, it is required to load keymap-related
+        // feature, when key is read, it searches through the corresponding
+        // keymap, and execute the function through the env (self.env.apply)
+        // Flow: A -> [insert] -> eval("(insert "A")")
+        // Flow: Transfer key to definition -> get keymap result -> eval
+        // e.g. ^[[D -> bind to "left" -> (left . move-backward) -> eval(move-backward)
         while (reading) {
             var plugin_full_statement = editing_plugin.?.buffer;
             if (parsing_byte(reader)) |inputEvent| {
@@ -320,36 +344,15 @@ pub const Shell = struct {
 
                 switch (inputEvent.key) {
                     .char => |key| {
-                        if (inputEvent.ctrl and key == .D) {
-                            reading = false;
-
-                            // TODO: Prevent using error to handle this?
-                            return ByteParsingError.EndOfStream;
-                        }
-
-                        // Backspace handling
-                        if (key == .Backspace) {
-                            // TODO: Functional key instead?
-                            if (editing_plugin) |_editing_plugin| {
-                                if (_editing_plugin.buffer.items.len == 0) {
-                                    continue;
-                                }
-
-                                if (_editing_plugin.pos > 0) {
-                                    try self.frontend.deleteBackwardChar(_editing_plugin.pos);
-                                    _editing_plugin.orderedRemove(_editing_plugin.pos - 1);
-                                    _editing_plugin.moveBackward(1);
-                                }
-                            }
-                        } else if (inputEvent.ctrl and key == .J) {
+                        // New entry point
+                        if (inputEvent.ctrl and key == .J) {
                             var copied_statement = try plugin_full_statement.clone();
                             defer copied_statement.deinit();
                             statement = try copied_statement.toOwnedSlice();
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
-                            // NOTE: Need to handle \n byte better
-                            try self.frontend.insert(null, '\n', editing_plugin.?.pos);
+                            try self.frontend.refresh(editing_plugin.?.buffer.items.len, 0, &[_]u8{'\n'});
                             reading = false;
 
                             // TODO(#42): Parsing the latest statement and store
@@ -359,7 +362,7 @@ pub const Shell = struct {
                             // for this.
                             self.*.curr_read = parsing_statement(statement);
 
-                            try self.frontend.clearContent(editing_plugin.?.pos);
+                            try self.frontend.clearContent(0);
 
                             if (statement.len == 0) {
                                 continue;
@@ -381,6 +384,9 @@ pub const Shell = struct {
                             // navigating function run before.
                             if (key == .N or key == .P) {
                                 if (plugin_full_statement.items.len != 0) {
+                                    // NOTE: For clearContent, keeps as a
+                                    // separate function now as to generalize to be
+                                    // refresh is complicated
                                     try self.frontend.clearContent(editing_plugin.?.pos);
                                     editing_plugin.?.clear();
                                 }
@@ -408,8 +414,10 @@ pub const Shell = struct {
                                     for (result) |byte| {
                                         if (editing_plugin) |_editing_plugin| {
                                             try _editing_plugin.insert(_editing_plugin.pos, byte);
-                                            try self.frontend.insert(null, byte, _editing_plugin.pos);
+
                                             _editing_plugin.moveForward(1);
+
+                                            try self.frontend.refresh(editing_plugin.?.pos - 1, 0, &[_]u8{byte});
                                         }
                                     }
                                 }
@@ -423,45 +431,47 @@ pub const Shell = struct {
                                 }
                             }
                         } else {
-                            if (inputEvent.ctrl) {
-                                continue;
-                            }
                             const bytes = inputEvent.raw;
                             for (bytes) |byte| {
-                                if (editing_plugin) |plugin| {
-                                    try plugin.insert(editing_plugin.?.pos, byte);
-                                }
+                                const aref_statement = try std.fmt.allocPrint(self.allocator, "(aref keymap {d})", .{byte});
+                                const result_statement = self.eval_statement_and_return(aref_statement);
+                                // Skip for nil
+                                // TODO: Mechanism to determine whether params is required
+                                // e.g. insert function.
+                                // For a simple approach, use basic if clause checking
+                                if (!std.mem.eql(u8, result_statement, "nil")) {
+                                    var final_statement: []u8 = undefined;
 
-                                try self.frontend.insert(null, byte, editing_plugin.?.pos);
-                                editing_plugin.?.moveForward(1);
+                                    if (std.mem.eql(u8, result_statement, "insert")) {
+                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
+                                            result_statement,
+                                            byte,
+                                        });
+                                    } else {
+                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s})", .{
+                                            result_statement,
+                                        });
+                                    }
+
+                                    self.eval_statement(final_statement, false);
+                                }
                             }
                         }
                     },
                     .functional => |key| {
                         // NOTE: Restrict for left and right only. No function
                         // yet on buffer.
+                        // NOTE: Resize frame case is not yet handled
                         if (key == .ArrowLeft) {
                             if (editing_plugin.?.pos > 0) {
-                                try self.frontend.move(1, .Left);
-
-                                editing_plugin.?.moveBackward(1);
+                                self.eval_statement("(backward-char)", false);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;
                             }
                         } else if (key == .ArrowRight) {
                             if (editing_plugin.?.pos < plugin_full_statement.items.len) {
-                                const prevCursor = try self.frontend.readCursorPos();
-
-                                if (prevCursor.x == self.frontend.frame_size.x) {
-                                    // Handle the case when cursor is at the end of window
-                                    try self.frontend.move(prevCursor.x - 1, .Left);
-                                    try self.frontend.move(1, .Down);
-                                } else {
-                                    try self.frontend.move(1, .Right);
-                                }
-
-                                editing_plugin.?.moveForward(1);
+                                self.eval_statement("(forward-char)", false);
 
                                 const cursor = try self.frontend.readCursorPos();
                                 self.buffer_cursor = cursor;

@@ -51,6 +51,9 @@ pub const VTable = struct {
 
     /// Clear content stored in the frontend
     clearContent: *const fn (context: *const anyopaque, pos: usize) anyerror!void,
+
+    /// Refresh the content in the frontend
+    refresh: *const fn (context: *const anyopaque, posStart: usize, charbefore: usize, modification: ?[]const u8) anyerror!void,
 };
 
 pub fn print(self: Self, string: []const u8) !void {
@@ -79,6 +82,10 @@ pub fn readCursorPos(self: Self) !Position {
 
 pub fn clearContent(self: Self, pos: usize) !void {
     return self.vtable.clearContent(self.context, pos);
+}
+
+pub fn refresh(self: Self, posStart: usize, charbefore: usize, modification: ?[]const u8) !void {
+    return self.vtable.refresh(self.context, posStart, charbefore, modification);
 }
 
 const Self = @This();
