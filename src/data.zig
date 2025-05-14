@@ -20,6 +20,10 @@ pub const EVAL_TABLE = std.StaticStringMap(LispFunction).initComptime(.{
     // into three bits(less than/great than/equal) and masking the bit
     // return the result by given the corresponding opeartions.
     .{ "=", &eqlsign },
+    .{ "<", &lss },
+    .{ "<=", &leq },
+    .{ ">", &gtr },
+    .{ ">=", &geq },
 });
 
 const ARITHMETIC_OPERATION = enum {
@@ -29,16 +33,81 @@ const ARITHMETIC_OPERATION = enum {
     div,
 };
 
+/// ArithCompareResult denotes three result for comparing number,
+/// thus using three bits to represents the result. The order is
+/// equal, less than and greater than. i.e. The reverse order of
+/// ARITHMETIC_COMPARE_OPERATION_BIT
+const ArithCompareResult = u3;
+
+const ARITHMETIC_COMPARE_OPERATION_BIT = enum(u2) {
+    gt,
+    lt,
+    eq,
+};
+
+const ARITHMETIC_COMPARE_OPERATION = enum(ArithCompareResult) {
+    gt = 1 << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.gt),
+    lt = 1 << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.lt),
+    eq = 1 << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.eq),
+};
+
 fn eqlsign(params: []MalType) MalTypeError!MalType {
-    // TODO: support compare number only
-    const first = try params[0].as_number();
-    for (params) |param| {
-        const value = try param.as_number();
-        if (first.value != value.value) {
-            return MalType{ .boolean = false };
+    const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq));
+
+    return MalType{ .boolean = result };
+}
+
+fn lss(params: []MalType) MalTypeError!MalType {
+    const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.lt));
+
+    return MalType{ .boolean = result };
+}
+
+fn leq(params: []MalType) MalTypeError!MalType {
+    const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq) | @intFromEnum(ARITHMETIC_COMPARE_OPERATION.lt));
+
+    return MalType{ .boolean = result };
+}
+
+fn gtr(params: []MalType) MalTypeError!MalType {
+    const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.gt));
+
+    return MalType{ .boolean = result };
+}
+
+fn geq(params: []MalType) MalTypeError!MalType {
+    const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq) | @intFromEnum(ARITHMETIC_COMPARE_OPERATION.gt));
+
+    return MalType{ .boolean = result };
+}
+
+/// To perform arithmatic comparsion, perform AND operation with desired ArithCompareResult bits setting
+/// to see if the result is truty or not.
+// TODO: Fix potential error case
+fn arithcompare(mal1: MalType, mal2: MalType) MalTypeError!ArithCompareResult {
+    const number1 = try mal1.as_number();
+    const number2 = try mal2.as_number();
+
+    var result: ArithCompareResult = 0b000;
+
+    const eq = @as(ArithCompareResult, @intFromBool(number1.value == number2.value)) << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.eq);
+    const lt = @as(ArithCompareResult, @intFromBool(number1.value < number2.value)) << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.lt);
+    const gt = @as(ArithCompareResult, @intFromBool(number1.value > number2.value)) << @intFromEnum(ARITHMETIC_COMPARE_OPERATION_BIT.gt);
+
+    result = eq | lt | gt;
+
+    return result;
+}
+
+fn arithcompare_driver(params: []MalType, operations: ArithCompareResult) MalTypeError!bool {
+    const len = params.len;
+    for (1..len) |i| {
+        const compareResult = try arithcompare(params[i - 1], params[i]);
+        if ((compareResult & operations) == 0) {
+            return false;
         }
     }
-    return MalType{ .boolean = true };
+    return true;
 }
 
 /// Refer to Emacs original comment
@@ -157,4 +226,56 @@ test "data - arith" {
 
     const eqlsign_unequal = try eqlsign(@constCast(&param1));
     try expectEqual(false, try eqlsign_unequal.as_boolean());
+}
+
+test "data - compare" {
+    const num0_1 = MalType{
+        .number = .{ .value = 0 },
+    };
+    const num0_2 = MalType{
+        .number = .{ .value = 0 },
+    };
+
+    const num1_1 = MalType{
+        .number = .{ .value = 1 },
+    };
+
+    const result_eq = try arithcompare(num0_1, num0_2);
+    try std.testing.expect(result_eq == 0b100);
+
+    const result_lt = try arithcompare(num0_1, num1_1);
+    try std.testing.expect(result_lt == 0b010);
+
+    const result_gt = try arithcompare(num1_1, num0_1);
+    try std.testing.expect(result_gt == 0b001);
+
+    const driver_result_lt_true = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num1_1 }), 0b010);
+    try expectEqual(true, driver_result_lt_true);
+
+    const driver_result_lt_false = try arithcompare_driver(@constCast(&[_]MalType{ num1_1, num0_1 }), 0b010);
+    try expectEqual(false, driver_result_lt_false);
+
+    const driver_result_leq_1 = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num1_1 }), 0b110);
+    try expectEqual(true, driver_result_leq_1);
+
+    const driver_result_leq_2 = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num0_2 }), 0b110);
+    try expectEqual(true, driver_result_leq_2);
+
+    const driver_result_leq_3 = try arithcompare_driver(@constCast(&[_]MalType{ num1_1, num0_1 }), 0b110);
+    try expectEqual(false, driver_result_leq_3);
+
+    const driver_result_gt_true = try arithcompare_driver(@constCast(&[_]MalType{ num1_1, num0_1 }), 0b001);
+    try expectEqual(true, driver_result_gt_true);
+
+    const driver_result_gt_false = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num1_1 }), 0b001);
+    try expectEqual(false, driver_result_gt_false);
+
+    const driver_result_geq_1 = try arithcompare_driver(@constCast(&[_]MalType{ num1_1, num0_1 }), 0b101);
+    try expectEqual(true, driver_result_geq_1);
+
+    const driver_result_geq_2 = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num0_2 }), 0b101);
+    try expectEqual(true, driver_result_geq_2);
+
+    const driver_result_geq_3 = try arithcompare_driver(@constCast(&[_]MalType{ num0_1, num1_1 }), 0b101);
+    try expectEqual(false, driver_result_geq_3);
 }

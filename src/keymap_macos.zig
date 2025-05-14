@@ -78,7 +78,9 @@ pub const CharKey = enum(u8) {
     Key8,
     Key9,
     SemiColon = 0x3b,
+    LessThan = 0x3c,
     Equal = 0x3d,
+    GreaterThan = 0x3e,
 
     BracketSquareLeft = 0x5b,
     BackSlash = 0x5c,
