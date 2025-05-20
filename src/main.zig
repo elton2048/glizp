@@ -441,11 +441,15 @@ pub const Shell = struct {
                                 // For a simple approach, use basic if clause checking
                                 if (!std.mem.eql(u8, result_statement, "nil")) {
                                     var final_statement: []u8 = undefined;
+                                    var str: []const u8 = &[_]u8{byte};
+                                    if (byte == '"') {
+                                        str = &[_]u8{ '\\', byte };
+                                    }
 
                                     if (std.mem.eql(u8, result_statement, "insert")) {
-                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{c}\")", .{
+                                        final_statement = try std.fmt.allocPrint(self.allocator, "({s} \"{s}\")", .{
                                             result_statement,
-                                            byte,
+                                            str,
                                         });
                                     } else {
                                         final_statement = try std.fmt.allocPrint(self.allocator, "({s})", .{

@@ -44,6 +44,11 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     .{ "if", &ifFunc },
     .{ "lambda", &lambdaFunc },
     // TODO: See if need to extract this out?
+    .{ "list", &listFunc },
+    .{ "listp", &isListFunc },
+    .{ "emptyp", &isEmptyFunc },
+    .{ "count", &countFunc },
+
     .{ "vector", &vectorFunc },
     .{ "vectorp", &isVectorFunc },
     .{ "aref", &arefFunc },
@@ -75,6 +80,77 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    var list = ArrayList(MalType).init(env.allocator);
+
+    for (params) |param| {
+        const mal_item = param.clone();
+        list.append(mal_item) catch @panic("test");
+    }
+
+    const mal = MalType{ .list = list };
+
+    return mal;
+}
+
+fn isListFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    // TODO: return better error.
+    std.debug.assert(params.len == 1);
+
+    const result = get(params, env) catch |err| switch (err) {
+        error.IllegalType => blk: {
+            break :blk params[0];
+        },
+        else => {
+            return err;
+        },
+    };
+    return listLikeFunc(result);
+}
+
+// NOTE: See if support vector case
+fn isEmptyFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const isList = try (try isListFunc(params, env)).as_boolean();
+
+    if (isList) {
+        const mal = get(params, env) catch |err| switch (err) {
+            error.IllegalType => blk: {
+                break :blk params[0];
+            },
+            else => {
+                return err;
+            },
+        };
+
+        const list = try mal.as_list();
+        const empty = list.items.len == 0;
+
+        return .{ .boolean = empty };
+    }
+
+    return .{ .boolean = false };
+}
+
+fn countFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    const isList = try (try isListFunc(params, env)).as_boolean();
+
+    if (isList) {
+        const mal = get(params, env) catch |err| switch (err) {
+            error.IllegalType => blk: {
+                break :blk params[0];
+            },
+            else => {
+                return err;
+            },
+        };
+
+        const list = try mal.as_list();
+        return .{ .number = .{ .value = @intCast(list.items.len) } };
+    }
+
+    return .{ .boolean = false };
+}
 
 fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     var vector = ArrayList(MalType).init(env.allocator);
@@ -140,6 +216,16 @@ fn messageAppend(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     };
 
     return MalType{ .boolean = true };
+}
+
+fn listLikeFunc(params: MalType) MalTypeError!MalType {
+    if (params.as_list()) |_| {
+        return MalType{ .boolean = true };
+    } else |_| {
+        return MalType{ .boolean = false };
+    }
+
+    return MalType{ .boolean = false };
 }
 
 fn vectorLikeFunc(params: MalType) MalTypeError!MalType {

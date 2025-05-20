@@ -84,6 +84,17 @@ pub const MalType = union(enum) {
         }
     }
 
+    pub fn clone(self: MalType) MalType {
+        switch (self) {
+            .string => |string| {
+                const new_string = string.clone() catch @panic("OOM");
+                return MalType{ .string = new_string };
+            },
+            else => {},
+        }
+        return self;
+    }
+
     pub fn as_symbol(self: MalType) MalTypeError![]const u8 {
         switch (self) {
             .symbol => |symbol| {
