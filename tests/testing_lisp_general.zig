@@ -666,3 +666,302 @@ test "load function - normal case" {
     const result = printer.pr_str(load_statement_value, true);
     try testing.expectEqualStrings("1", result);
 }
+
+test "eq function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var eq_statement_1 = Reader.init(
+        allocator,
+        "(= 0 0)",
+    );
+    defer eq_statement_1.deinit();
+
+    const eq_statement_value_1 = try env.apply(eq_statement_1.ast_root);
+    defer eq_statement_value_1.deinit();
+
+    const result_1 = printer.pr_str(eq_statement_value_1, true);
+    try testing.expectEqualStrings("t", result_1);
+
+    var eq_statement_2 = Reader.init(
+        allocator,
+        "(= 0 1)",
+    );
+    defer eq_statement_2.deinit();
+
+    const eq_statement_value_2 = try env.apply(eq_statement_2.ast_root);
+    defer eq_statement_value_2.deinit();
+
+    const result_2 = printer.pr_str(eq_statement_value_2, true);
+    try testing.expectEqualStrings("nil", result_2);
+
+    var eq_statement_3 = Reader.init(
+        allocator,
+        "(= 1 1 1)",
+    );
+    defer eq_statement_3.deinit();
+
+    const eq_statement_value_3 = try env.apply(eq_statement_3.ast_root);
+    defer eq_statement_value_3.deinit();
+
+    const result_3 = printer.pr_str(eq_statement_value_3, true);
+    try testing.expectEqualStrings("t", result_3);
+
+    var eq_statement_4 = Reader.init(
+        allocator,
+        "(= 1 1 0)",
+    );
+    defer eq_statement_4.deinit();
+
+    const eq_statement_value_4 = try env.apply(eq_statement_4.ast_root);
+    defer eq_statement_value_4.deinit();
+
+    const result_4 = printer.pr_str(eq_statement_value_4, true);
+    try testing.expectEqualStrings("nil", result_4);
+}
+
+test "lss function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var lss_statement_1 = Reader.init(
+        allocator,
+        "(< 1 2)",
+    );
+    defer lss_statement_1.deinit();
+
+    const lss_statement_value_1 = try env.apply(lss_statement_1.ast_root);
+    defer lss_statement_value_1.deinit();
+
+    const result_1 = printer.pr_str(lss_statement_value_1, true);
+    try testing.expectEqualStrings("t", result_1);
+
+    var lss_statement_2 = Reader.init(
+        allocator,
+        "(< 1 2 2)",
+    );
+    defer lss_statement_2.deinit();
+
+    const lss_statement_value_2 = try env.apply(lss_statement_2.ast_root);
+    defer lss_statement_value_2.deinit();
+
+    const result_2 = printer.pr_str(lss_statement_value_2, true);
+    try testing.expectEqualStrings("nil", result_2);
+
+    var lss_statement_3 = Reader.init(
+        allocator,
+        "(< 3 2)",
+    );
+    defer lss_statement_3.deinit();
+
+    const lss_statement_value_3 = try env.apply(lss_statement_3.ast_root);
+    defer lss_statement_value_3.deinit();
+
+    const result_3 = printer.pr_str(lss_statement_value_3, true);
+    try testing.expectEqualStrings("nil", result_3);
+
+    var lss_statement_4 = Reader.init(
+        allocator,
+        "(< 2 2)",
+    );
+    defer lss_statement_4.deinit();
+
+    const lss_statement_value_4 = try env.apply(lss_statement_4.ast_root);
+    defer lss_statement_value_4.deinit();
+
+    const result_4 = printer.pr_str(lss_statement_value_4, true);
+    try testing.expectEqualStrings("nil", result_4);
+}
+
+test "leq function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var leq_statement_1 = Reader.init(
+        allocator,
+        "(<= 1 2)",
+    );
+    defer leq_statement_1.deinit();
+
+    const leq_statement_value_1 = try env.apply(leq_statement_1.ast_root);
+    defer leq_statement_value_1.deinit();
+
+    const result_1 = printer.pr_str(leq_statement_value_1, true);
+    try testing.expectEqualStrings("t", result_1);
+
+    var leq_statement_2 = Reader.init(
+        allocator,
+        "(<= 1 2 2)",
+    );
+    defer leq_statement_2.deinit();
+
+    const leq_statement_value_2 = try env.apply(leq_statement_2.ast_root);
+    defer leq_statement_value_2.deinit();
+
+    const result_2 = printer.pr_str(leq_statement_value_2, true);
+    try testing.expectEqualStrings("t", result_2);
+
+    var leq_statement_3 = Reader.init(
+        allocator,
+        "(<= 3 2)",
+    );
+    defer leq_statement_3.deinit();
+
+    const leq_statement_value_3 = try env.apply(leq_statement_3.ast_root);
+    defer leq_statement_value_3.deinit();
+
+    const result_3 = printer.pr_str(leq_statement_value_3, true);
+    try testing.expectEqualStrings("nil", result_3);
+
+    var leq_statement_4 = Reader.init(
+        allocator,
+        "(<= 2 2)",
+    );
+    defer leq_statement_4.deinit();
+
+    const leq_statement_value_4 = try env.apply(leq_statement_4.ast_root);
+    defer leq_statement_value_4.deinit();
+
+    const result_4 = printer.pr_str(leq_statement_value_4, true);
+    try testing.expectEqualStrings("t", result_4);
+
+    var leq_statement_5 = Reader.init(
+        allocator,
+        "(<= 3 1 2)",
+    );
+    defer leq_statement_5.deinit();
+
+    const leq_statement_value_5 = try env.apply(leq_statement_5.ast_root);
+    defer leq_statement_value_5.deinit();
+
+    const result_5 = printer.pr_str(leq_statement_value_5, true);
+    try testing.expectEqualStrings("nil", result_5);
+}
+
+test "gtr function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var gtr_statement_1 = Reader.init(
+        allocator,
+        "(> 2 1)",
+    );
+    defer gtr_statement_1.deinit();
+
+    const gtr_statement_value_1 = try env.apply(gtr_statement_1.ast_root);
+    defer gtr_statement_value_1.deinit();
+
+    const result_1 = printer.pr_str(gtr_statement_value_1, true);
+    try testing.expectEqualStrings("t", result_1);
+
+    var gtr_statement_2 = Reader.init(
+        allocator,
+        "(> 2 1 1)",
+    );
+    defer gtr_statement_2.deinit();
+
+    const gtr_statement_value_2 = try env.apply(gtr_statement_2.ast_root);
+    defer gtr_statement_value_2.deinit();
+
+    const result_2 = printer.pr_str(gtr_statement_value_2, true);
+    try testing.expectEqualStrings("nil", result_2);
+
+    var gtr_statement_3 = Reader.init(
+        allocator,
+        "(> 2 3)",
+    );
+    defer gtr_statement_3.deinit();
+
+    const gtr_statement_value_3 = try env.apply(gtr_statement_3.ast_root);
+    defer gtr_statement_value_3.deinit();
+
+    const result_3 = printer.pr_str(gtr_statement_value_3, true);
+    try testing.expectEqualStrings("nil", result_3);
+
+    var gtr_statement_4 = Reader.init(
+        allocator,
+        "(> 2 2)",
+    );
+    defer gtr_statement_4.deinit();
+
+    const gtr_statement_value_4 = try env.apply(gtr_statement_4.ast_root);
+    defer gtr_statement_value_4.deinit();
+
+    const result_4 = printer.pr_str(gtr_statement_value_4, true);
+    try testing.expectEqualStrings("nil", result_4);
+}
+
+test "geq function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var geq_statement_1 = Reader.init(
+        allocator,
+        "(>= 2 1)",
+    );
+    defer geq_statement_1.deinit();
+
+    const geq_statement_value_1 = try env.apply(geq_statement_1.ast_root);
+    defer geq_statement_value_1.deinit();
+
+    const result_1 = printer.pr_str(geq_statement_value_1, true);
+    try testing.expectEqualStrings("t", result_1);
+
+    var geq_statement_2 = Reader.init(
+        allocator,
+        "(>= 2 2 1)",
+    );
+    defer geq_statement_2.deinit();
+
+    const geq_statement_value_2 = try env.apply(geq_statement_2.ast_root);
+    defer geq_statement_value_2.deinit();
+
+    const result_2 = printer.pr_str(geq_statement_value_2, true);
+    try testing.expectEqualStrings("t", result_2);
+
+    var geq_statement_3 = Reader.init(
+        allocator,
+        "(>= 2 3)",
+    );
+    defer geq_statement_3.deinit();
+
+    const geq_statement_value_3 = try env.apply(geq_statement_3.ast_root);
+    defer geq_statement_value_3.deinit();
+
+    const result_3 = printer.pr_str(geq_statement_value_3, true);
+    try testing.expectEqualStrings("nil", result_3);
+
+    var geq_statement_4 = Reader.init(
+        allocator,
+        "(>= 2 2)",
+    );
+    defer geq_statement_4.deinit();
+
+    const geq_statement_value_4 = try env.apply(geq_statement_4.ast_root);
+    defer geq_statement_value_4.deinit();
+
+    const result_4 = printer.pr_str(geq_statement_value_4, true);
+    try testing.expectEqualStrings("t", result_4);
+
+    var geq_statement_5 = Reader.init(
+        allocator,
+        "(>= 3 1 2)",
+    );
+    defer geq_statement_5.deinit();
+
+    const geq_statement_value_5 = try env.apply(geq_statement_5.ast_root);
+    defer geq_statement_value_5.deinit();
+
+    const result_5 = printer.pr_str(geq_statement_value_5, true);
+    try testing.expectEqualStrings("nil", result_5);
+}

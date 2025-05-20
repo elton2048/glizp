@@ -30,11 +30,33 @@ pub const MalTypeError = error{
     Unhandled,
     IllegalType,
     FileNotFound,
+    ArithError,
 };
 
+pub const NumberType = f64;
+
 pub const Number = struct {
-    // TODO: Support for floating point
-    value: u64,
+    value: NumberType,
+
+    pub fn isInteger(self: Number) bool {
+        return @trunc(self.value) == self.value;
+    }
+
+    pub fn isFloat(self: Number) bool {
+        return !self.isInteger();
+    }
+
+    pub fn integer(self: Number) MalTypeError!i64 {
+        if (!self.isInteger()) {
+            return MalTypeError.IllegalType;
+        }
+        return @intFromFloat(self.value);
+    }
+
+    pub fn to_usize(self: Number) MalTypeError!usize {
+        const int = try self.integer();
+        return @as(usize, @intCast(int));
+    }
 };
 
 pub const MalType = union(enum) {
@@ -251,4 +273,21 @@ test "LispHashMap" {
     if (value1_optional_result) |value| {
         try testing.expectEqual(value, "value1");
     }
+}
+
+test "Number" {
+    const f1 = Number{ .value = 0.2 };
+    try testing.expect(!f1.isInteger());
+    try testing.expect(f1.isFloat());
+    try testing.expectError(MalTypeError.IllegalType, f1.integer());
+
+    const int1 = Number{ .value = 1 };
+    try testing.expect(int1.isInteger());
+    try testing.expect(!int1.isFloat());
+
+    const int1_int = try int1.integer();
+    try testing.expectEqual(1, int1_int);
+
+    const int1_usize = try int1.to_usize();
+    try testing.expectEqual(1, int1_usize);
 }

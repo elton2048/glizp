@@ -39,6 +39,14 @@ fn isDigit(char: u8) bool {
     return char >= '0' and char <= '9';
 }
 
+fn isSignChar(char: u8) bool {
+    return char == '+' or char == '-';
+}
+
+fn isValidNumberChar(char: u8) bool {
+    return isDigit(char) or char == '.' or isSignChar(char);
+}
+
 const LispEnv = @import("env.zig").LispEnv;
 
 // NOTE: Currently the regex requires fix to allow repeater after pipe('|')
@@ -311,8 +319,18 @@ pub const Reader = struct {
 
         var isNumber = true;
         var isString = false;
-        while (iter.next()) |char| {
-            if (!isDigit(char)) {
+        var point: usize = 0;
+        var i: usize = 0;
+        while (iter.next()) |char| : (i += 1) {
+            if (char == '.') {
+                point += 1;
+            }
+
+            if ((token.len == 1 and isSignChar(char)) or
+                !isValidNumberChar(char) or
+                point > 1 or
+                (i > 0 and isSignChar(char)))
+            {
                 isNumber = false;
             }
             if (!isString and iter.index == 1 and char == '\"' and token[token.len - 1] == '\"') {
@@ -345,7 +363,7 @@ pub const Reader = struct {
         if (isNumber) {
             mal = MalType{
                 .number = .{
-                    .value = utils.parseU64(token, 10) catch @panic("Unexpected overflow."),
+                    .value = std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."),
                 },
             };
         } else if (isBoolean) |mal_bool| {

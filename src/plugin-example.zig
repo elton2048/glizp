@@ -9,6 +9,7 @@ const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
 const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
+const NumberType = lisp.NumberType;
 
 const MessageQueue = @import("message_queue.zig").MessageQueue;
 
@@ -25,7 +26,8 @@ fn get(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     const pluginEnv: *PluginExample = @ptrCast(@alignCast(env));
 
-    const result = MalType{ .number = .{ .value = pluginEnv.num } };
+    const value: NumberType = @floatFromInt(pluginEnv.num);
+    const result = MalType{ .number = .{ .value = value } };
 
     utils.log("get-plugin-value", pluginEnv.num);
 
@@ -39,7 +41,8 @@ fn add(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     pluginEnv.num += 1;
 
-    const result = MalType{ .number = .{ .value = pluginEnv.num } };
+    const value: NumberType = @floatFromInt(pluginEnv.num);
+    const result = MalType{ .number = .{ .value = value } };
 
     utils.log("set-plugin-value", pluginEnv.num);
 
@@ -51,7 +54,7 @@ fn set(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     const value = try params[0].as_number();
 
-    pluginEnv.num = value.value;
+    pluginEnv.num = try value.integer();
 
     return params[0];
 }
@@ -59,7 +62,7 @@ fn set(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 pub const PluginExample = struct {
     _fnTable: std.StaticStringMap(LispFunctionWithOpaque),
 
-    num: u64,
+    num: i64,
 
     pub fn init(allocator: std.mem.Allocator) *PluginExample {
         const self = allocator.create(PluginExample) catch @panic("OOM");
