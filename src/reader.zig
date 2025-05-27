@@ -191,9 +191,7 @@ pub const Reader = struct {
                         @panic("Unexpected error");
                     },
                 };
-                mal = MalType{
-                    .list = list,
-                };
+                mal = MalType.new_list(list);
             } else if (char == SExprEnd) {
                 mal = .SExprEnd;
             } else if (char == VectorExprStart) {
@@ -210,9 +208,7 @@ pub const Reader = struct {
                         @panic("Unexpected error");
                     },
                 };
-                mal = MalType{
-                    .list = list,
-                };
+                mal = MalType.new_list(list);
             } else if (char == VectorExprEnd) {
                 mal = .VectorExprEnd;
             } else {
@@ -377,9 +373,7 @@ pub const Reader = struct {
                 .boolean = mal_bool,
             };
         } else if (isString) {
-            mal = MalType{
-                .string = str_al,
-            };
+            mal = MalType.new_string(str_al);
         } else {
             mal = MalType{
                 .symbol = token,
