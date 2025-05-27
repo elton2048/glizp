@@ -344,6 +344,9 @@ pub const Shell = struct {
 
                 switch (inputEvent.key) {
                     .char => |key| {
+                        if (inputEvent.ctrl and key == .C) {
+                            self.quit();
+                        }
                         // New entry point
                         if (inputEvent.ctrl and key == .J) {
                             var copied_statement = try plugin_full_statement.clone();
@@ -503,6 +506,7 @@ pub const Shell = struct {
 
     pub fn quit(self: *Shell) void {
         self.*.frontend.deinit();
+        self.*.env.deinit();
         self.*.deinit();
         std.process.exit(0);
     }

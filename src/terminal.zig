@@ -383,6 +383,8 @@ pub const Terminal = struct {
         attrs.c_lflag ^= c.ICANON;
         // Disable ECHO flag; Don't echo input characters
         attrs.c_lflag ^= c.ECHO;
+        // Disable SIGINT flag;
+        attrs.c_lflag ^= c.ISIG;
 
         // attrs.c_cc = self.prog_termios.cc;
         const stdin_fd = self.stdin_fd;
