@@ -12,6 +12,10 @@ pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
 
 pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
 
+/// For function with tail call optimization, there is no return as it should keep looping
+/// until the second arg (*MalType) is eval to be non-list type.
+pub const LispFunctionWithTail = *const fn ([]*MalType, **MalType, *LispEnv) MalTypeError!void;
+
 /// For plugin purpose, the function shall allow to reference back
 /// to the plugin instance, which is denoted as *anyopaque.
 pub const LispFunctionWithOpaque = *const fn ([]MalType, *anyopaque) MalTypeError!MalType;
@@ -19,6 +23,7 @@ pub const LispFunctionWithOpaque = *const fn ([]MalType, *anyopaque) MalTypeErro
 pub const GenericLispFunction = union(enum) {
     simple: LispFunction,
     with_env: LispFunctionWithEnv,
+    with_tail: LispFunctionWithTail,
     plugin: LispFunctionWithOpaque,
 };
 

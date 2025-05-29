@@ -15,6 +15,7 @@ const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
 const LispFunctionWithEnv = lisp.LispFunctionWithEnv;
+const LispFunctionWithTail = lisp.LispFunctionWithTail;
 const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
 const GenericLispFunction = lisp.GenericLispFunction;
 
@@ -63,6 +64,12 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // to a queue and consumed in a loop. This architecture is expected
     // to be expanded for plugin usage.
     .{ "msg-append", &messageAppend },
+});
+
+/// Tail optimization implementation requires more testing and evaluation
+/// to ensure it works properly.
+pub const SPECIAL_ENV_WITH_TAIL_EVAL_TABLE = std.StaticStringMap(LispFunctionWithTail).initComptime(.{
+    .{ "if*", &ifTailFunc },
 });
 
 pub const FunctionType = union(enum) {
@@ -243,7 +250,7 @@ fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 2);
 
     const key = try params[0].as_symbol();
-    const value = env.apply(params[1]) catch |err| switch (err) {
+    const value = env.apply(params[1], false) catch |err| switch (err) {
         error.IllegalType => return MalTypeError.IllegalType,
         error.Unhandled => return MalTypeError.Unhandled,
         else => return MalTypeError.Unhandled,
@@ -280,7 +287,7 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         _ = try set(list.items, newEnv);
     }
 
-    return newEnv.apply(eval_arg);
+    return newEnv.apply(eval_arg, false);
 }
 
 fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
@@ -302,11 +309,41 @@ fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         statement_false = params[2];
     }
 
-    const condition = (try env.apply(condition_arg)).as_boolean() catch true;
+    const condition = (try env.apply(condition_arg, false)).as_boolean() catch true;
     if (!condition) {
-        return env.apply(statement_false);
+        return env.apply(statement_false, false);
     }
-    return env.apply(statement_true);
+    return env.apply(statement_true, false);
+}
+
+fn ifTailFunc(params: []*MalType, first_arg: **MalType, env: *LispEnv) MalTypeError!void {
+    const condition_arg = params[0];
+    const statement_true = params[1];
+    // NOTE: In elisp the last params corresponds to false case,
+    // it is not the case right now.
+    // i.e. (if (= 1 2) 1 2 3 4) => 4
+    var statement_false: *MalType = undefined;
+
+    if (params.len == 1) {
+        // TODO: Better error type
+        return MalTypeError.IllegalType;
+    }
+
+    if (params.len == 2) {
+        statement_false = @constCast(&MalType{ .boolean = false });
+    } else {
+        statement_false = params[2];
+    }
+
+    const condition = (try env.apply(condition_arg.*, false)).as_boolean() catch true;
+    if (!condition) {
+        first_arg.* = statement_false;
+
+        return;
+    }
+    first_arg.* = statement_true;
+
+    return;
 }
 
 fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
@@ -342,7 +379,7 @@ fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
                 index += 1;
             }
 
-            return _env.apply(eval_statement);
+            return _env.apply(eval_statement, false);
         }
     }.func;
 
@@ -387,7 +424,7 @@ fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     const reader = Reader.init(env.allocator, content.items);
     defer reader.deinit();
 
-    const result = try env.apply(reader.ast_root);
+    const result = try env.apply(reader.ast_root, false);
 
     return result;
 }
@@ -425,6 +462,13 @@ pub const LispEnv = struct {
                 value = .{
                     .type = .internal,
                     .func = .{ .with_env = func },
+                    .reference = reference,
+                };
+            },
+            LispFunctionWithTail => {
+                value = .{
+                    .type = .internal,
+                    .func = .{ .with_tail = func },
                     .reference = reference,
                 };
             },
@@ -614,6 +658,7 @@ pub const LispEnv = struct {
         const fnTable = @constCast(&lisp.LispHashMap(FunctionWithAttributes).init(allocator));
         readFromFnMap(LispFunction, fnTable, data.EVAL_TABLE, STOCK_REFERENCE);
         readFromFnMap(LispFunctionWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
+        readFromFnMap(LispFunctionWithTail, fnTable, SPECIAL_ENV_WITH_TAIL_EVAL_TABLE, STOCK_REFERENCE);
 
         const internalData = ArrayList(MalType).init(allocator);
 
@@ -774,227 +819,280 @@ pub const LispEnv = struct {
     /// return accordingly.
     ///
     /// The caller handles the memory allocated, check if the result is handled properly.
-    pub fn apply(self: *Self, mal: MalType) !MalType {
-        switch (mal) {
-            .list => |list| {
-                const result = self.applyList(list, false);
-                // NOTE: deinit on the item inside the hash map and the env
-                // is different
-                // If a value is evaled further it will be kept without
-                // direct access. At the deinit stage of the env it cannot
-                // be accessed as the direct access is lost.
-                // Thus deinit the value after each lisp is applied/evaled
-                // for now.
-                // TODO: Should keep such value within the env and further
-                // handle afterwards? Then this is a simple GC job.
-                return result;
-            },
-            .symbol => |symbol| {
-                return self.getVar(symbol);
-            },
-            else => return mal,
-        }
-    }
+    pub fn apply(self: *Self, mal: MalType, nested: bool) !MalType {
+        const apply_mal_ref = self.allocator.create(MalType) catch @panic("OOM");
+        defer self.allocator.destroy(apply_mal_ref);
+        // self.dataCollector.put(apply_mal_ref.*) catch @panic("");
+        apply_mal_ref.* = mal;
+        // var apply_mal_ref = @constCast(&mal);
+        // utils.log_pointer(apply_mal_ref);
 
-    /// Apply function for a list, which eval the list and return the result,
-    /// it takes the first param (which should be in symbol form) as
-    /// function name and apply latter to be params.
-    /// It checks if all the params on the layer needs further apply first,
-    /// return the result to be the param.
-    /// e.g. For (+ 1 2 (+ 2 3))
-    /// -> (+ 1 2 5) ;; Eval (+ 2 3) in recursion
-    /// -> 8
-    /// TODO: Consider if continuous apply is suitable, possible and more scalable
-    /// e.g. For (+ 1 2 (+ 2 3))
-    /// -> (+ 3 (+ 2 3))         ;; Hit (+ 1 2), call add function with accum = 1 and param = 2
-    /// -> (+ 3 5)               ;; Hit the list (+2 3); Eval (+ 2 3), perhaps in new thread?
-    /// -> 8
-    fn applyList(self: *Self, list: ArrayList(MalType), nested: bool) MalTypeError!MalType {
-        var fnName: []const u8 = undefined;
-        var lambda_function_pointer: ?*LispEnv = null;
-        var mal_param: MalType = undefined;
-        var lambda_func_run_checker: bool = true;
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        const allocator = gpa.allocator();
+        base: while (true) {
+            switch (apply_mal_ref.*) {
+                .list => |list| {
+                    // Apply function for a list, which eval the list and return the result,
+                    // it takes the first param (which should be in symbol form) as
+                    // function name and apply latter to be params.
+                    // It checks if all the params on the layer needs further apply first,
+                    // return the result to be the param.
+                    // e.g. For (+ 1 2 (+ 2 3))
+                    // -> (+ 1 2 5) ;; Eval (+ 2 3) in recursion
+                    // -> 8
+                    // TODO: Consider if continuous apply is suitable, possible and more scalable
+                    // e.g. For (+ 1 2 (+ 2 3))
+                    // -> (+ 3 (+ 2 3))         ;; Hit (+ 1 2), call add function with accum = 1 and param = 2
+                    // -> (+ 3 5)               ;; Hit the list (+2 3); Eval (+ 2 3), perhaps in new thread?
+                    // -> 8
 
-        var params = ArrayList(MalType).init(allocator);
-        defer {
-            params.deinit();
-            const check = gpa.deinit();
-            std.debug.assert(check == .ok);
-        }
+                    var fnName: []const u8 = undefined;
+                    var lambda_function_pointer: ?*LispEnv = null;
+                    var mal_param: MalType = undefined;
+                    var lambda_func_run_checker: bool = true;
+                    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+                    const allocator = gpa.allocator();
 
-        for (list.items, 0..) |_mal, i| {
-            if (i == 0) {
-                switch (_mal) {
-                    .symbol => |symbol| {
-                        fnName = symbol;
-                    },
-                    .function => |_lambda| {
-                        _ = _lambda;
-                        // TODO: Stub to by-pass the further eval steps
-                        // and proceed to generate params for the function.
-                        // A more sophisticated way is preferred later
-                        fnName = "";
-                    },
-                    .list => |_list| {
-                        // TODO: Grap the MalType out and apply further.
-                        const innerLisp = try self.applyList(_list, true);
-                        if (innerLisp.as_function()) |_lambda| {
-                            lambda_function_pointer = _lambda;
-                            fnName = "";
-                        } else |_| {}
-                    },
-                    else => {
-                        utils.log("ERROR", "Illegal type to be evaled");
-                        return MalTypeError.IllegalType;
-                    },
-                }
-                continue;
-            }
-
-            // TODO: Simple and lazy way for checking "special" form
-            if (std.hash_map.eqlString(fnName, "lambda")) {
-                if (!nested) {
-                    lambda_func_run_checker = false;
-                }
-                mal_param = _mal;
-            } else
-
-            // TODO: Simple and lazy way for checking "special" form
-            if (std.hash_map.eqlString(fnName, "let*")) {
-                mal_param = _mal;
-            } else
-
-            // TODO: Simple and lazy way for checking "special" form
-            if (std.hash_map.eqlString(fnName, "def!")) {
-                switch (_mal) {
-                    .list => {
-                        // TODO: Need more assertion
-                        // Assume the return type fits with the function
-                        mal_param = try self.apply(_mal);
-
-                        if (mal_param == .Incompleted) {
-                            return MalTypeError.IllegalType;
-                        }
-                    },
-                    else => {
-                        mal_param = _mal;
-                    },
-                }
-            } else
-
-            // TODO: Simple and lazy way for checking "special" form
-            if (SPECIAL_ENV_EVAL_TABLE.has(fnName)) {
-                switch (_mal) {
-                    .list => {
-                        // TODO: Need more assertion
-                        // Assume the return type fits with the function
-                        mal_param = try self.apply(_mal);
-
-                        self.dataCollector.put(mal_param) catch |err| switch (err) {
-                            else => return MalTypeError.Unhandled,
-                        };
-                        if (mal_param == .Incompleted) {
-                            return MalTypeError.IllegalType;
-                        }
-                    },
-                    else => {
-                        mal_param = _mal;
-                    },
-                }
-            } else {
-                switch (_mal) {
-                    .list, .symbol => {
-                        // TODO: Need more assertion
-                        // Assume the return type fits with the function
-                        mal_param = try self.apply(_mal);
-                        defer mal_param.deinit();
-
-                        if (mal_param == .Incompleted) {
-                            return MalTypeError.IllegalType;
-                        }
-                    },
-                    else => {
-                        mal_param = _mal;
-                    },
-                }
-            }
-
-            params.append(mal_param) catch |err| switch (err) {
-                // TODO: Meaningful error for such case
-                error.OutOfMemory => return MalTypeError.Unhandled,
-            };
-        }
-
-        var optional_env: ?*LispEnv = self;
-
-        while (optional_env) |env| {
-            var key = MalType{ .symbol = fnName };
-
-            if (env.fnTable.get(&key)) |funcWithAttr| {
-                const func = funcWithAttr.func;
-                // NOTE: Entry point to store MalType created within
-                // apply function
-                var fnValue: MalType = undefined;
-                switch (func) {
-                    .simple => |simple_func| {
-                        fnValue = try @call(.auto, simple_func, .{
-                            params.items,
-                        });
-                    },
-                    .with_env => |env_func| {
-                        fnValue = try @call(.auto, env_func, .{
-                            params.items,
-                            self,
-                        });
-                    },
-                    .plugin => |plugin_func| {
-                        const reference = funcWithAttr.reference;
-                        const plugin = @constCast(self.plugins.get(reference).?.context);
-
-                        fnValue = try @call(.auto, plugin_func, .{
-                            params.items,
-                            plugin,
-                        });
-                    },
-                }
-
-                if (!lambda_func_run_checker) {
-                    // Put the item into data collector for garbage collection
-                    self.dataCollector.put(fnValue) catch |err| switch (err) {
-                        else => return MalTypeError.Unhandled,
-                    };
-                }
-
-                return fnValue;
-            }
-
-            // For lambda function case, excepted to have an inner eval
-            // of the lambda function already.
-            else if (lambda_function_pointer) |lambda| {
-                // TODO: This may not be useful at all
-                lambda_func_run_checker = true;
-                var _key = MalType{ .symbol = LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY };
-                defer _key.deinit();
-
-                if (lambda.fnTable.get(&_key)) |funcWithAttr| {
-                    const func = funcWithAttr.func;
-                    var fnValue: MalType = undefined;
-
-                    switch (func) {
-                        .with_env => |env_func| {
-                            fnValue = try @call(.auto, env_func, .{ params.items, lambda });
-                        },
-                        else => unreachable,
+                    var params = ArrayList(MalType).init(allocator);
+                    defer {
+                        params.deinit();
+                        // const check = gpa.deinit();
+                        // std.debug.assert(check == .ok);
                     }
-                    return fnValue;
-                }
-            }
-            optional_env = env.outer;
-        }
 
-        return .Incompleted;
+                    for (list.items, 0..) |_mal, i| {
+                        if (i == 0) {
+                            switch (_mal) {
+                                .symbol => |symbol| {
+                                    fnName = symbol;
+                                },
+                                .function => |_lambda| {
+                                    _ = _lambda;
+                                    // TODO: Stub to by-pass the further eval steps
+                                    // and proceed to generate params for the function.
+                                    // A more sophisticated way is preferred later
+                                    fnName = "";
+                                },
+                                .list => |_list| {
+                                    // TODO: Grap the MalType out and apply further.
+                                    // const innerLisp = try self.applyList(_list, true);
+                                    _ = _list;
+                                    const innerLisp = try self.apply(_mal, true);
+                                    if (innerLisp.as_function()) |_lambda| {
+                                        lambda_function_pointer = _lambda;
+                                        fnName = "";
+                                    } else |_| {}
+                                },
+                                else => {
+                                    utils.log("ERROR", "Illegal type to be evaled");
+                                    return MalTypeError.IllegalType;
+                                },
+                            }
+                            continue;
+                        }
+
+                        // TODO: Simple and lazy way for checking "special" form
+                        if (std.hash_map.eqlString(fnName, "lambda")) {
+                            // TODO: apply nested elsewhere
+                            if (!nested) {
+                                lambda_func_run_checker = false;
+                            }
+                            mal_param = _mal;
+                        } else
+
+                        // TODO: Simple and lazy way for checking "special" form
+                        if (std.hash_map.eqlString(fnName, "let*")) {
+                            mal_param = _mal;
+                        } else
+
+                        // TODO: Simple and lazy way for checking "special" form
+                        if (std.hash_map.eqlString(fnName, "def!")) {
+                            switch (_mal) {
+                                .list => {
+                                    // for def! case, should not eval the list
+                                    mal_param = _mal;
+                                    // // TODO: Need more assertion
+                                    // // Assume the return type fits with the function
+                                    // mal_param = try self.apply(_mal, false);
+
+                                    // if (mal_param == .Incompleted) {
+                                    //     return MalTypeError.IllegalType;
+                                    // }
+                                },
+                                else => {
+                                    mal_param = _mal;
+                                },
+                            }
+                        } else
+
+                        // TODO: Simple and lazy way for checking "special" form
+                        if (SPECIAL_ENV_EVAL_TABLE.has(fnName)) {
+                            switch (_mal) {
+                                .list => {
+                                    // TODO: Need more assertion
+                                    // Assume the return type fits with the function
+                                    mal_param = try self.apply(_mal, false);
+
+                                    self.dataCollector.put(mal_param) catch |err| switch (err) {
+                                        else => return MalTypeError.Unhandled,
+                                    };
+                                    if (mal_param == .Incompleted) {
+                                        return MalTypeError.IllegalType;
+                                    }
+                                },
+                                else => {
+                                    mal_param = _mal;
+                                },
+                            }
+                        } else {
+                            switch (_mal) {
+                                .list, .symbol => {
+                                    // TODO: Need more assertion
+                                    // Assume the return type fits with the function
+                                    mal_param = try self.apply(_mal, false);
+                                    defer mal_param.deinit();
+
+                                    if (mal_param == .Incompleted) {
+                                        return MalTypeError.IllegalType;
+                                    }
+                                },
+                                else => {
+                                    mal_param = _mal;
+                                },
+                            }
+                        }
+
+                        params.append(mal_param) catch |err| switch (err) {
+                            // TODO: Meaningful error for such case
+                            error.OutOfMemory => return MalTypeError.Unhandled,
+                        };
+                    }
+
+                    var optional_env: ?*LispEnv = self;
+
+                    while (optional_env) |env| {
+                        logz.info()
+                            .fmt("[env_test]", "{s}", .{fnName})
+                            .level(.Debug)
+                            .log();
+
+                        var key = MalType{ .symbol = fnName };
+
+                        if (env.fnTable.get(&key)) |funcWithAttr| {
+                            const func = funcWithAttr.func;
+                            // NOTE: Entry point to store MalType created within
+                            // apply function
+                            var fnValue: MalType = undefined;
+                            switch (func) {
+                                .simple => |simple_func| {
+                                    fnValue = try @call(.auto, simple_func, .{
+                                        params.items,
+                                    });
+                                },
+                                .with_env => |env_func| {
+                                    fnValue = try @call(.auto, env_func, .{
+                                        params.items,
+                                        self,
+                                    });
+                                },
+                                .with_tail => |tail_func| {
+                                    // NOTE: To apply tail call optimization, pointer has to be used to keep the
+                                    // the call. In general however, other functions are using value to keep the
+                                    // implementation more simple, without handling the underlying allocation
+                                    // for MalType form.
+                                    // In this case a new array list holding the pointer of MalType is copied
+                                    // from value, and modifying the pointer of MalType to achieve potential
+                                    // optimization. Afterwards copy the value back to original ref.
+                                    // Handling memory allocation of MalType v.s. Separate branch implementaion like this
+                                    var params_ref = ArrayList(*MalType).init(allocator);
+                                    defer params_ref.deinit();
+
+                                    for (params.items) |*item| {
+                                        params_ref.append(item) catch @panic("Unhandled");
+                                    }
+
+                                    const ref = env.allocator.create(*MalType) catch @panic("");
+                                    defer env.allocator.destroy(ref);
+
+                                    ref.* = apply_mal_ref;
+
+                                    try @call(.auto, tail_func, .{
+                                        params_ref.items,
+                                        ref,
+                                        self,
+                                    });
+
+                                    // Modifying apply_mal_ref directly causing corruption
+                                    // Copy the value back to ref.
+                                    apply_mal_ref.* = ref.*.*;
+                                    continue :base;
+                                },
+                                .plugin => |plugin_func| {
+                                    const reference = funcWithAttr.reference;
+                                    const plugin = @constCast(self.plugins.get(reference).?.context);
+
+                                    fnValue = try @call(.auto, plugin_func, .{
+                                        params.items,
+                                        plugin,
+                                    });
+                                },
+                            }
+
+                            if (!lambda_func_run_checker) {
+                                // Put the item into data collector for garbage collection
+                                self.dataCollector.put(fnValue) catch |err| switch (err) {
+                                    else => return MalTypeError.Unhandled,
+                                };
+                            }
+
+                            logz.info()
+                                .fmt("[LISP_ENV]", "eval {any}", .{fnValue})
+                                .level(.Debug)
+                                .log();
+
+                            return fnValue;
+                        }
+
+                        // For lambda function case, excepted to have an inner eval
+                        // of the lambda function already.
+                        else if (lambda_function_pointer) |lambda| {
+                            // TODO: This may not be useful at all
+                            lambda_func_run_checker = true;
+                            var _key = MalType{ .symbol = LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY };
+                            defer _key.deinit();
+
+                            if (lambda.fnTable.get(&_key)) |funcWithAttr| {
+                                const func = funcWithAttr.func;
+                                var fnValue: MalType = undefined;
+
+                                switch (func) {
+                                    .with_env => |env_func| {
+                                        fnValue = try @call(.auto, env_func, .{ params.items, lambda });
+                                    },
+                                    else => unreachable,
+                                }
+                                return fnValue;
+                            }
+                        }
+                        optional_env = env.outer;
+                    }
+
+                    return apply_mal_ref.*;
+                    // NOTE: deinit on the item inside the hash map and the env
+                    // is different
+                    // If a value is evaled further it will be kept without
+                    // direct access. At the deinit stage of the env it cannot
+                    // be accessed as the direct access is lost.
+                    // Thus deinit the value after each lisp is applied/evaled
+                    // for now.
+                    // TODO: Should keep such value within the env and further
+                    // handle afterwards? Then this is a simple GC job.
+                    // return result;
+                },
+                .symbol => |symbol| {
+                    return self.getVar(symbol);
+                },
+                else => return apply_mal_ref.*,
+            }
+        }
     }
 };
 
@@ -1030,7 +1128,7 @@ test "env" {
         const env = LispEnv.init_root(allocator);
         defer env.deinit();
 
-        const plus1_value = try env.apply(plus1);
+        const plus1_value = try env.apply(plus1, false);
         const plus1_value_number = plus1_value.as_number() catch unreachable;
         try testing.expectEqual(3, plus1_value_number.value);
     }
@@ -1043,7 +1141,7 @@ test "env" {
         const env = LispEnv.init_root(allocator);
         defer env.deinit();
 
-        const vector1_value = try env.apply(vector1.ast_root);
+        const vector1_value = try env.apply(vector1.ast_root, false);
         const vector1_value_vector = vector1_value.as_vector() catch unreachable;
         defer vector1_value_vector.deinit();
 

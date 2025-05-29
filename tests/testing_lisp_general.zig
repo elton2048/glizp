@@ -33,7 +33,7 @@ test "eval function without function name - unexpected non-symbol case - (1 2)" 
 
     try testing.expect(invalid_statement.ast_root == .list);
 
-    if (env.apply(invalid_statement.ast_root)) |_| {} else |err| {
+    if (env.apply(invalid_statement.ast_root, false)) |_| {} else |err| {
         try testing.expectEqual(MalTypeError.IllegalType, err);
     }
 }
@@ -47,7 +47,7 @@ test "plus function - simple case" {
     var plus_statement = Reader.init(allocator, "(+ 1 2 3)");
     defer plus_statement.deinit();
 
-    const plus_statement_value = try env.apply(plus_statement.ast_root);
+    const plus_statement_value = try env.apply(plus_statement.ast_root, false);
 
     const result = printer.pr_str(plus_statement_value, true);
     try testing.expectEqualStrings("6", result);
@@ -64,7 +64,7 @@ test "plus function - list within list" {
 
     try testing.expect(plus_statement.ast_root == .list);
 
-    const plus_statement_value = try env.apply(plus_statement.ast_root);
+    const plus_statement_value = try env.apply(plus_statement.ast_root, false);
 
     const result = printer.pr_str(plus_statement_value, true);
     try testing.expectEqualStrings("6", result);
@@ -81,7 +81,7 @@ test "def function - simple case" {
 
     try testing.expect(def_statement.ast_root == .list);
 
-    const def_statement_value = try env.apply(def_statement.ast_root);
+    const def_statement_value = try env.apply(def_statement.ast_root, false);
 
     const result = printer.pr_str(def_statement_value, true);
     try testing.expectEqualStrings("1", result);
@@ -98,7 +98,7 @@ test "def function - with list eval case" {
 
     try testing.expect(def_statment.ast_root == .list);
 
-    const def_statment_value = try env.apply(def_statment.ast_root);
+    const def_statment_value = try env.apply(def_statment.ast_root, false);
 
     const result = printer.pr_str(def_statment_value, true);
     try testing.expectEqualStrings("3", result);
@@ -115,7 +115,7 @@ test "let* function - simple case" {
 
     try testing.expect(letx_statement.ast_root == .list);
 
-    const letx_statement_value = try env.apply(letx_statement.ast_root);
+    const letx_statement_value = try env.apply(letx_statement.ast_root, false);
 
     const result = printer.pr_str(letx_statement_value, true);
     try testing.expectEqualStrings("5", result);
@@ -132,7 +132,7 @@ test "let* function - multiple let* case" {
 
     try testing.expect(letx_statement.ast_root == .list);
 
-    const letx_statement_value = try env.apply(letx_statement.ast_root);
+    const letx_statement_value = try env.apply(letx_statement.ast_root, false);
 
     const result = printer.pr_str(letx_statement_value, true);
     try testing.expectEqualStrings("5", result);
@@ -149,7 +149,7 @@ test "if function - normal truthy case" {
 
     try testing.expect(if_statement.ast_root == .list);
 
-    const if_statement_value = try env.apply(if_statement.ast_root);
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
 
     const result = printer.pr_str(if_statement_value, true);
     try testing.expectEqualStrings("2", result);
@@ -166,7 +166,7 @@ test "if function - normal falsy case" {
 
     try testing.expect(if_statement.ast_root == .list);
 
-    const if_statement_value = try env.apply(if_statement.ast_root);
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
 
     const result = printer.pr_str(if_statement_value, true);
     try testing.expectEqualStrings("1", result);
@@ -183,7 +183,7 @@ test "if function - incompleted truthy case" {
 
     try testing.expect(if_statement.ast_root == .list);
 
-    const if_statement_value = try env.apply(if_statement.ast_root);
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
 
     const result = printer.pr_str(if_statement_value, true);
     try testing.expectEqualStrings("1", result);
@@ -200,7 +200,7 @@ test "if function - incompleted falsy case" {
 
     try testing.expect(if_statement.ast_root == .list);
 
-    const if_statement_value = try env.apply(if_statement.ast_root);
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
 
     const result = printer.pr_str(if_statement_value, true);
     try testing.expectEqualStrings("nil", result);
@@ -217,7 +217,7 @@ test "if function - non-boolean case" {
 
     try testing.expect(if_statement.ast_root == .list);
 
-    const if_statement_value = try env.apply(if_statement.ast_root);
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
 
     const result = printer.pr_str(if_statement_value, true);
     try testing.expectEqualStrings("2", result);
@@ -254,7 +254,7 @@ test "lambda function - non-executed case" {
 
     try testing.expect(lambda_statement.ast_root == .list);
 
-    const lambda_statement_value = try env.apply(lambda_statement.ast_root);
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
     try testing.expect(lambda_statement_value == .function);
 
     const result = printer.pr_str(lambda_statement_value, true);
@@ -272,7 +272,7 @@ test "lambda function - simple case - single variable" {
 
     try testing.expect(lambda_statement.ast_root == .list);
 
-    const lambda_statement_value = try env.apply(lambda_statement.ast_root);
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
 
     const result = printer.pr_str(lambda_statement_value, true);
     try testing.expectEqualStrings("3", result);
@@ -289,7 +289,7 @@ test "lambda function - simple case - multiple variables" {
 
     try testing.expect(lambda_statement.ast_root == .list);
 
-    const lambda_statement_value = try env.apply(lambda_statement.ast_root);
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
 
     const result = printer.pr_str(lambda_statement_value, true);
     try testing.expectEqualStrings("6", result);
@@ -307,7 +307,7 @@ test "list function  - simple case" {
     try testing.expect(list_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const list_statement_value = try env.apply(list_statement.ast_root);
+    const list_statement_value = try env.apply(list_statement.ast_root, false);
     defer list_statement_value.deinit();
 
     const result = printer.pr_str(list_statement_value, true);
@@ -326,7 +326,7 @@ test "list function  - multiple type case" {
     try testing.expect(list_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const list_statement_value = try env.apply(list_statement.ast_root);
+    const list_statement_value = try env.apply(list_statement.ast_root, false);
     defer list_statement_value.deinit();
 
     const result = printer.pr_str(list_statement_value, true);
@@ -344,7 +344,7 @@ test "listp function - truthy case" {
 
     try testing.expect(listp_statement.ast_root == .list);
 
-    const listp_statement_value = try env.apply(listp_statement.ast_root);
+    const listp_statement_value = try env.apply(listp_statement.ast_root, false);
 
     const result = printer.pr_str(listp_statement_value, true);
     try testing.expectEqualStrings("t", result);
@@ -361,7 +361,7 @@ test "listp function - falsy case" {
 
     try testing.expect(listp_statement.ast_root == .list);
 
-    const listp_statement_value = try env.apply(listp_statement.ast_root);
+    const listp_statement_value = try env.apply(listp_statement.ast_root, false);
 
     const result = printer.pr_str(listp_statement_value, true);
     try testing.expectEqualStrings("nil", result);
@@ -378,7 +378,7 @@ test "emptyp function - truthy case" {
 
     try testing.expect(emptyp_statement.ast_root == .list);
 
-    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root);
+    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root, false);
 
     const result = printer.pr_str(emptyp_statement_value, true);
     try testing.expectEqualStrings("t", result);
@@ -395,7 +395,7 @@ test "emptyp function - falsy case" {
 
     try testing.expect(emptyp_statement.ast_root == .list);
 
-    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root);
+    const emptyp_statement_value = try env.apply(emptyp_statement.ast_root, false);
 
     const result = printer.pr_str(emptyp_statement_value, true);
     try testing.expectEqualStrings("nil", result);
@@ -413,7 +413,7 @@ test "count function" {
     try testing.expect(count_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const count_statement_value = try env.apply(count_statement.ast_root);
+    const count_statement_value = try env.apply(count_statement.ast_root, false);
     defer count_statement_value.deinit();
 
     const result = printer.pr_str(count_statement_value, true);
@@ -432,7 +432,7 @@ test "[] syntax to create vector - simple case" {
     try testing.expect(vector_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    const vector_statement_value = try env.apply(vector_statement.ast_root, false);
     defer vector_statement_value.deinit();
 
     const result = printer.pr_str(vector_statement_value, true);
@@ -451,7 +451,7 @@ test "vector function - simple case" {
     try testing.expect(vector_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    const vector_statement_value = try env.apply(vector_statement.ast_root, false);
     defer vector_statement_value.deinit();
 
     const result = printer.pr_str(vector_statement_value, true);
@@ -470,7 +470,7 @@ test "vector function - simple symbol case" {
     try testing.expect(vector_statement.ast_root == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
-    const vector_statement_value = try env.apply(vector_statement.ast_root);
+    const vector_statement_value = try env.apply(vector_statement.ast_root, false);
     defer vector_statement_value.deinit();
 
     const result = printer.pr_str(vector_statement_value, true);
@@ -488,7 +488,7 @@ test "vectorp function - truthy case" {
 
     try testing.expect(vectorp_statement.ast_root == .list);
 
-    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root);
+    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root, false);
 
     const result = printer.pr_str(vectorp_statement_value, true);
     try testing.expectEqualStrings("t", result);
@@ -505,7 +505,7 @@ test "vectorp function - falsy case" {
 
     try testing.expect(vectorp_statement.ast_root == .list);
 
-    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root);
+    const vectorp_statement_value = try env.apply(vectorp_statement.ast_root, false);
 
     const result = printer.pr_str(vectorp_statement_value, true);
     try testing.expectEqualStrings("nil", result);
@@ -523,7 +523,7 @@ test "vectorp function - through let* to create variable case" {
     );
     defer is_vector_var_statement.deinit();
 
-    const is_vector_var_statement_value = try env.apply(is_vector_var_statement.ast_root);
+    const is_vector_var_statement_value = try env.apply(is_vector_var_statement.ast_root, false);
 
     const result = printer.pr_str(is_vector_var_statement_value, true);
     try testing.expectEqualStrings("t", result);
@@ -543,7 +543,7 @@ test "aref function - direct get from vector constructor" {
 
     try testing.expect(aref_statement.ast_root == .list);
 
-    const aref_statement_value = try env.apply(aref_statement.ast_root);
+    const aref_statement_value = try env.apply(aref_statement.ast_root, false);
 
     const result = printer.pr_str(aref_statement_value, true);
     try testing.expectEqualStrings("2", result);
@@ -558,14 +558,14 @@ test "aref function - get from variable" {
     var def_statement = Reader.init(allocator, "(def! a [1 2 3])");
     defer def_statement.deinit();
 
-    _ = try env.apply(def_statement.ast_root);
+    _ = try env.apply(def_statement.ast_root, false);
 
     var aref_statement = Reader.init(allocator, "(aref a 1)");
     defer aref_statement.deinit();
 
     try testing.expect(aref_statement.ast_root == .list);
 
-    const aref_statement_value = try env.apply(aref_statement.ast_root);
+    const aref_statement_value = try env.apply(aref_statement.ast_root, false);
 
     const result = printer.pr_str(aref_statement_value, true);
     try testing.expectEqualStrings("2", result);
@@ -583,7 +583,7 @@ test "fs-load function - normal case" {
     );
     defer fs_load_statement.deinit();
 
-    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root);
+    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root, false);
     defer fs_load_statement_value.deinit();
 
     const result = printer.pr_str(fs_load_statement_value, true);
@@ -618,7 +618,7 @@ test "fs-load function - load lisp file and execute def" {
     );
     defer fs_load_statement.deinit();
 
-    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root);
+    const fs_load_statement_value = try env.apply(fs_load_statement.ast_root, false);
     defer fs_load_statement_value.deinit();
 
     const fs_load_statement_value_string = try fs_load_statement_value.as_string();
@@ -636,13 +636,13 @@ test "fs-load function - load lisp file and execute def" {
     );
     defer exec_def_statement.deinit();
 
-    const exec_def_statement_value = try env.apply(exec_def_statement.ast_root);
+    const exec_def_statement_value = try env.apply(exec_def_statement.ast_root, false);
     defer exec_def_statement_value.deinit();
 
     const verify_statement = Reader.init(allocator, "a");
     defer verify_statement.deinit();
 
-    const verify_statement_value = try env.apply(verify_statement.ast_root);
+    const verify_statement_value = try env.apply(verify_statement.ast_root, false);
 
     const result = printer.pr_str(verify_statement_value, true);
     try testing.expectEqualStrings("1", result);
@@ -660,7 +660,7 @@ test "load function - normal case" {
     );
     defer load_statement.deinit();
 
-    const load_statement_value = try env.apply(load_statement.ast_root);
+    const load_statement_value = try env.apply(load_statement.ast_root, false);
     defer load_statement_value.deinit();
 
     const result = printer.pr_str(load_statement_value, true);
@@ -679,7 +679,7 @@ test "eq function" {
     );
     defer eq_statement_1.deinit();
 
-    const eq_statement_value_1 = try env.apply(eq_statement_1.ast_root);
+    const eq_statement_value_1 = try env.apply(eq_statement_1.ast_root, false);
     defer eq_statement_value_1.deinit();
 
     const result_1 = printer.pr_str(eq_statement_value_1, true);
@@ -691,7 +691,7 @@ test "eq function" {
     );
     defer eq_statement_2.deinit();
 
-    const eq_statement_value_2 = try env.apply(eq_statement_2.ast_root);
+    const eq_statement_value_2 = try env.apply(eq_statement_2.ast_root, false);
     defer eq_statement_value_2.deinit();
 
     const result_2 = printer.pr_str(eq_statement_value_2, true);
@@ -703,7 +703,7 @@ test "eq function" {
     );
     defer eq_statement_3.deinit();
 
-    const eq_statement_value_3 = try env.apply(eq_statement_3.ast_root);
+    const eq_statement_value_3 = try env.apply(eq_statement_3.ast_root, false);
     defer eq_statement_value_3.deinit();
 
     const result_3 = printer.pr_str(eq_statement_value_3, true);
@@ -715,7 +715,7 @@ test "eq function" {
     );
     defer eq_statement_4.deinit();
 
-    const eq_statement_value_4 = try env.apply(eq_statement_4.ast_root);
+    const eq_statement_value_4 = try env.apply(eq_statement_4.ast_root, false);
     defer eq_statement_value_4.deinit();
 
     const result_4 = printer.pr_str(eq_statement_value_4, true);
@@ -734,7 +734,7 @@ test "lss function" {
     );
     defer lss_statement_1.deinit();
 
-    const lss_statement_value_1 = try env.apply(lss_statement_1.ast_root);
+    const lss_statement_value_1 = try env.apply(lss_statement_1.ast_root, false);
     defer lss_statement_value_1.deinit();
 
     const result_1 = printer.pr_str(lss_statement_value_1, true);
@@ -746,7 +746,7 @@ test "lss function" {
     );
     defer lss_statement_2.deinit();
 
-    const lss_statement_value_2 = try env.apply(lss_statement_2.ast_root);
+    const lss_statement_value_2 = try env.apply(lss_statement_2.ast_root, false);
     defer lss_statement_value_2.deinit();
 
     const result_2 = printer.pr_str(lss_statement_value_2, true);
@@ -758,7 +758,7 @@ test "lss function" {
     );
     defer lss_statement_3.deinit();
 
-    const lss_statement_value_3 = try env.apply(lss_statement_3.ast_root);
+    const lss_statement_value_3 = try env.apply(lss_statement_3.ast_root, false);
     defer lss_statement_value_3.deinit();
 
     const result_3 = printer.pr_str(lss_statement_value_3, true);
@@ -770,7 +770,7 @@ test "lss function" {
     );
     defer lss_statement_4.deinit();
 
-    const lss_statement_value_4 = try env.apply(lss_statement_4.ast_root);
+    const lss_statement_value_4 = try env.apply(lss_statement_4.ast_root, false);
     defer lss_statement_value_4.deinit();
 
     const result_4 = printer.pr_str(lss_statement_value_4, true);
@@ -789,7 +789,7 @@ test "leq function" {
     );
     defer leq_statement_1.deinit();
 
-    const leq_statement_value_1 = try env.apply(leq_statement_1.ast_root);
+    const leq_statement_value_1 = try env.apply(leq_statement_1.ast_root, false);
     defer leq_statement_value_1.deinit();
 
     const result_1 = printer.pr_str(leq_statement_value_1, true);
@@ -801,7 +801,7 @@ test "leq function" {
     );
     defer leq_statement_2.deinit();
 
-    const leq_statement_value_2 = try env.apply(leq_statement_2.ast_root);
+    const leq_statement_value_2 = try env.apply(leq_statement_2.ast_root, false);
     defer leq_statement_value_2.deinit();
 
     const result_2 = printer.pr_str(leq_statement_value_2, true);
@@ -813,7 +813,7 @@ test "leq function" {
     );
     defer leq_statement_3.deinit();
 
-    const leq_statement_value_3 = try env.apply(leq_statement_3.ast_root);
+    const leq_statement_value_3 = try env.apply(leq_statement_3.ast_root, false);
     defer leq_statement_value_3.deinit();
 
     const result_3 = printer.pr_str(leq_statement_value_3, true);
@@ -825,7 +825,7 @@ test "leq function" {
     );
     defer leq_statement_4.deinit();
 
-    const leq_statement_value_4 = try env.apply(leq_statement_4.ast_root);
+    const leq_statement_value_4 = try env.apply(leq_statement_4.ast_root, false);
     defer leq_statement_value_4.deinit();
 
     const result_4 = printer.pr_str(leq_statement_value_4, true);
@@ -837,7 +837,7 @@ test "leq function" {
     );
     defer leq_statement_5.deinit();
 
-    const leq_statement_value_5 = try env.apply(leq_statement_5.ast_root);
+    const leq_statement_value_5 = try env.apply(leq_statement_5.ast_root, false);
     defer leq_statement_value_5.deinit();
 
     const result_5 = printer.pr_str(leq_statement_value_5, true);
@@ -856,7 +856,7 @@ test "gtr function" {
     );
     defer gtr_statement_1.deinit();
 
-    const gtr_statement_value_1 = try env.apply(gtr_statement_1.ast_root);
+    const gtr_statement_value_1 = try env.apply(gtr_statement_1.ast_root, false);
     defer gtr_statement_value_1.deinit();
 
     const result_1 = printer.pr_str(gtr_statement_value_1, true);
@@ -868,7 +868,7 @@ test "gtr function" {
     );
     defer gtr_statement_2.deinit();
 
-    const gtr_statement_value_2 = try env.apply(gtr_statement_2.ast_root);
+    const gtr_statement_value_2 = try env.apply(gtr_statement_2.ast_root, false);
     defer gtr_statement_value_2.deinit();
 
     const result_2 = printer.pr_str(gtr_statement_value_2, true);
@@ -880,7 +880,7 @@ test "gtr function" {
     );
     defer gtr_statement_3.deinit();
 
-    const gtr_statement_value_3 = try env.apply(gtr_statement_3.ast_root);
+    const gtr_statement_value_3 = try env.apply(gtr_statement_3.ast_root, false);
     defer gtr_statement_value_3.deinit();
 
     const result_3 = printer.pr_str(gtr_statement_value_3, true);
@@ -892,7 +892,7 @@ test "gtr function" {
     );
     defer gtr_statement_4.deinit();
 
-    const gtr_statement_value_4 = try env.apply(gtr_statement_4.ast_root);
+    const gtr_statement_value_4 = try env.apply(gtr_statement_4.ast_root, false);
     defer gtr_statement_value_4.deinit();
 
     const result_4 = printer.pr_str(gtr_statement_value_4, true);
@@ -911,7 +911,7 @@ test "geq function" {
     );
     defer geq_statement_1.deinit();
 
-    const geq_statement_value_1 = try env.apply(geq_statement_1.ast_root);
+    const geq_statement_value_1 = try env.apply(geq_statement_1.ast_root, false);
     defer geq_statement_value_1.deinit();
 
     const result_1 = printer.pr_str(geq_statement_value_1, true);
@@ -923,7 +923,7 @@ test "geq function" {
     );
     defer geq_statement_2.deinit();
 
-    const geq_statement_value_2 = try env.apply(geq_statement_2.ast_root);
+    const geq_statement_value_2 = try env.apply(geq_statement_2.ast_root, false);
     defer geq_statement_value_2.deinit();
 
     const result_2 = printer.pr_str(geq_statement_value_2, true);
@@ -935,7 +935,7 @@ test "geq function" {
     );
     defer geq_statement_3.deinit();
 
-    const geq_statement_value_3 = try env.apply(geq_statement_3.ast_root);
+    const geq_statement_value_3 = try env.apply(geq_statement_3.ast_root, false);
     defer geq_statement_value_3.deinit();
 
     const result_3 = printer.pr_str(geq_statement_value_3, true);
@@ -947,7 +947,7 @@ test "geq function" {
     );
     defer geq_statement_4.deinit();
 
-    const geq_statement_value_4 = try env.apply(geq_statement_4.ast_root);
+    const geq_statement_value_4 = try env.apply(geq_statement_4.ast_root, false);
     defer geq_statement_value_4.deinit();
 
     const result_4 = printer.pr_str(geq_statement_value_4, true);
@@ -959,7 +959,7 @@ test "geq function" {
     );
     defer geq_statement_5.deinit();
 
-    const geq_statement_value_5 = try env.apply(geq_statement_5.ast_root);
+    const geq_statement_value_5 = try env.apply(geq_statement_5.ast_root, false);
     defer geq_statement_value_5.deinit();
 
     const result_5 = printer.pr_str(geq_statement_value_5, true);
