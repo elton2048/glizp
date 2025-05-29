@@ -54,7 +54,8 @@ fn forwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
         }
     }
 
-    self.movePoint(steps.value, true);
+    const steps_value = try steps.to_usize();
+    self.movePoint(steps_value, true);
 
     return .{ .boolean = false };
 }
@@ -78,7 +79,8 @@ fn backwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
         };
     }
 
-    self.movePoint(steps.value, false);
+    const steps_value = try steps.to_usize();
+    self.movePoint(steps_value, false);
 
     return .{ .boolean = false };
 }
@@ -121,7 +123,8 @@ fn deleteChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
             len = .{ .value = 1 };
         }
 
-        pluginEnv.replace(pluginEnv.pos, len.value, &.{});
+        const len_value = try len.to_usize();
+        pluginEnv.replace(pluginEnv.pos, len_value, &.{});
 
         pluginEnv.frontend.refresh(pluginEnv.pos, 1, "") catch |err| switch (err) {
             else => return MalTypeError.Unhandled,
@@ -145,7 +148,8 @@ fn deleteBackwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
             len = .{ .value = 1 };
         }
 
-        pluginEnv.replace(pluginEnv.pos - 1, len.value, &.{});
+        const len_value = try len.to_usize();
+        pluginEnv.replace(pluginEnv.pos - 1, len_value, &.{});
         pluginEnv.movePoint(1, false);
 
         pluginEnv.frontend.move(1, .Left) catch |err| switch (err) {

@@ -19,7 +19,8 @@ fn historyLen(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     const pluginEnv: *PluginHistory = @ptrCast(@alignCast(env));
 
-    return MalType{ .number = .{ .value = pluginEnv.history.items.len } };
+    const value: lisp.NumberType = @floatFromInt(pluginEnv.history.items.len);
+    return MalType{ .number = .{ .value = value } };
 }
 
 pub const PluginHistory = struct {

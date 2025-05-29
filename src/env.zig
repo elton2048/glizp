@@ -146,7 +146,7 @@ fn countFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         };
 
         const list = try mal.as_list();
-        return .{ .number = .{ .value = @intCast(list.items.len) } };
+        return .{ .number = .{ .value = @floatFromInt(list.items.len) } };
     }
 
     return .{ .boolean = false };
@@ -189,12 +189,13 @@ fn arefFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         },
     };
     const vector = try array.as_vector();
-    const index = try params[1].as_number();
+    const index_num = try params[1].as_number();
+    const index = try index_num.to_usize();
 
     var result: MalType = MalType{ .boolean = false };
 
-    if (index.value < vector.items.len) {
-        result = vector.items[index.value];
+    if (index < vector.items.len) {
+        result = vector.items[index];
     }
 
     return result;
