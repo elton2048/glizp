@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const logz = @import("logz");
+const zeit = @import("zeit");
 
 const utils = @import("utils.zig");
 const keymap = @import("keymap_macos.zig");
@@ -153,15 +154,48 @@ pub const Shell = struct {
         set: bool,
     };
 
+    /// Return log file name. The format should be a date containg year,
+    /// month and day, with a suffix behind.
+    fn log_filename(allocator: std.mem.Allocator) []u8 {
+        const now = zeit.instant(.{}) catch |err| switch (err) {
+            else => @panic("Unexpected error to get current time"),
+        };
+        const dt_now = now.time();
+
+        var date_al = ArrayList(u8).init(allocator);
+        defer date_al.deinit();
+
+        dt_now.strftime(date_al.writer(), "%Y-%m-%d") catch |err| switch (err) {
+            error.InvalidFormat => @panic("InvalidFormat"),
+            error.Overflow => @panic("Year overflow"),
+            error.UnsupportedSpecifier => @panic("Unexpected UnsupportedSpecifier error, check the original library"),
+            error.UnknownSpecifier => @panic("Unexpected UnknownSpecifier error, check the original library"),
+
+            // zig fmt: off
+            // TODO: Generalize memory/space issue error
+            error.NoSpaceLeft,
+            error.OutOfMemory => @panic("Memory issue"),
+            // zig fmt: on
+        };
+
+        return std.fmt.allocPrint(allocator, "{s}-glizp.log", .{date_al.items}) catch |err| switch (err) {
+            error.OutOfMemory => @panic("Memory issue"),
+        };
+    }
+
     pub fn init(allocator: std.mem.Allocator, terminal: *Terminal) *Shell {
         // NOTE: Currently the logger cannot be configured to log in
-        // multiple outputs (like stdout then file)
+        // multiple outputs (like stdout then file). Using multiple
+        // writers may solve this issue.
+
+        const filename = log_filename(allocator);
+
         logz.setup(allocator, .{
             .pool_size = 2,
             .buffer_size = 4096,
             .level = .Debug,
             // .output = .stdout,
-            .output = .{ .file = "glizp.log" },
+            .output = .{ .file = filename },
         }) catch @panic("cannot initialize log manager");
 
         const logger = logz.logger().pool;

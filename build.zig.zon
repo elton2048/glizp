@@ -16,6 +16,10 @@
             .url = "https://github.com/mitchellh/libxev/archive/94ed6af7b2aaaeab987fbf87fcee410063df715b.tar.gz",
             .hash = "12207bbafd62d126bacad2444d9422fe51c9ac89aef662dbf66a228053722f27a0d6",
         },
+        .zeit = .{
+            .url = "https://github.com/rockorager/zeit/archive/refs/tags/v0.6.0.tar.gz",
+            .hash = "zeit-0.0.0-5I6bk_pZAgB03N1p1GmVOZ--gOFwwQSRKj1UXb5tnaKS",
+        },
     },
     .paths = .{
         "",

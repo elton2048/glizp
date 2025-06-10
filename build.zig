@@ -43,6 +43,12 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("xev", xev.module("xev"));
 
+    const zeit = b.dependency("zeit", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zeit", zeit.module("zeit"));
+
     // Provides glizp module out, which makes glizp to be used as a library.
     const glizp_module = b.addModule("glizp", .{
         .root_source_file = b.path("src/lib.zig"),
@@ -53,6 +59,7 @@ pub fn build(b: *std.Build) void {
     glizp_module.addImport("logz", logz.module("logz"));
     glizp_module.addImport("regex", regex.module("regex"));
     glizp_module.addImport("xev", xev.module("xev"));
+    glizp_module.addImport("zeit", zeit.module("zeit"));
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
