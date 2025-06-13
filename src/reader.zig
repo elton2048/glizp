@@ -346,8 +346,14 @@ pub const Reader = struct {
             }
             // Handle escape character cases
             if (char == '\\') {
-                if (iter.peek() == '\"') {
+                const peek_char = iter.peek();
+                if (peek_char == '\"') {
                     // Skip the escape character
+                    continue;
+                } else if (peek_char == '\\') {
+                    _ = iter.next();
+                    str_al.append(char) catch unreachable;
+
                     continue;
                 }
             }
@@ -467,6 +473,26 @@ test "string case - double back slash case" {
     try testing.expect(str3.ast_root == .string);
     const string3 = str3.ast_root.as_string() catch unreachable;
     try testing.expectEqualStrings("te\\st", string3.items);
+}
+
+test "string case - back slash case" {
+    const allocator = std.testing.allocator;
+
+    // NOTE: \\ corresponds to one \ as the first one is required for
+    // escape purpose
+    var single_backslash_str1 = Reader.init(allocator, "\"\\\\\"");
+    defer single_backslash_str1.deinit();
+
+    try testing.expect(single_backslash_str1.ast_root == .string);
+    const string1 = single_backslash_str1.ast_root.as_string() catch unreachable;
+    try testing.expectEqualStrings("\\", string1.items);
+
+    var single_backslash_str2 = Reader.init(allocator, "\"\\\\\\\\\"");
+    defer single_backslash_str2.deinit();
+
+    try testing.expect(single_backslash_str2.ast_root == .string);
+    const string2 = single_backslash_str2.ast_root.as_string() catch unreachable;
+    try testing.expectEqualStrings("\\\\", string2.items);
 }
 
 test "list case - simple case" {

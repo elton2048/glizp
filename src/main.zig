@@ -479,7 +479,7 @@ pub const Shell = struct {
                                 if (!std.mem.eql(u8, result_statement, "nil")) {
                                     var final_statement: []u8 = undefined;
                                     var str: []const u8 = &[_]u8{byte};
-                                    if (byte == '"') {
+                                    if (byte == '"' or byte == '\\') {
                                         str = &[_]u8{ '\\', byte };
                                     }
 
