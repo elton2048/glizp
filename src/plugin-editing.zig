@@ -24,7 +24,7 @@ const EVAL_TABLE = std.StaticStringMap(LispFunctionWithOpaque).initComptime(.{
 });
 
 fn forwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
-    var steps: lisp.Number = undefined;
+    var steps: lisp.NumberData = undefined;
 
     if (params.len > 0) {
         steps = params[0].as_number() catch |err| switch (err) {
@@ -61,7 +61,7 @@ fn forwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 }
 
 fn backwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
-    var steps: lisp.Number = undefined;
+    var steps: lisp.NumberData = undefined;
 
     if (params.len > 0) {
         steps = params[0].as_number() catch |err| switch (err) {
@@ -113,7 +113,7 @@ fn deleteChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     if (pluginEnv.buffer.items.len > 0 and
         pluginEnv.pos < pluginEnv.buffer.items.len)
     {
-        var len: lisp.Number = undefined;
+        var len: lisp.NumberData = undefined;
 
         if (params.len > 0) {
             len = params[0].as_number() catch |err| switch (err) {
@@ -138,7 +138,7 @@ fn deleteBackwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
 
     if (pluginEnv.buffer.items.len > 0 and pluginEnv.pos > 0) {
-        var len: lisp.Number = undefined;
+        var len: lisp.NumberData = undefined;
 
         if (params.len > 0) {
             len = params[0].as_number() catch |err| switch (err) {

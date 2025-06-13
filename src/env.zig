@@ -96,7 +96,7 @@ fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         list.append(mal_item) catch @panic("test");
     }
 
-    const mal = MalType{ .list = list };
+    const mal = MalType.new_list(list);
 
     return mal;
 }
@@ -166,7 +166,7 @@ fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         error.OutOfMemory => return MalTypeError.IllegalType,
     };
 
-    const mal = MalType{ .vector = vector };
+    const mal = MalType.new_vector(vector);
 
     return mal;
 }
@@ -400,7 +400,7 @@ fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
 
     const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
 
-    return MalType{ .string = al_result };
+    return MalType.new_string(al_result);
 }
 
 fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
@@ -858,7 +858,7 @@ pub const LispEnv = struct {
                         // std.debug.assert(check == .ok);
                     }
 
-                    for (list.items, 0..) |_mal, i| {
+                    for (list.data.items, 0..) |_mal, i| {
                         if (i == 0) {
                             switch (_mal) {
                                 .symbol => |symbol| {

@@ -41,7 +41,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
             string.appendSlice(result) catch @panic("allocator error");
         },
         .string => |str| {
-            var iter = StringIterator.init(str.items);
+            var iter = StringIterator.init(str.data.items);
 
             // NOTE: In implementing (str) function, the double quotes are
             // extra
@@ -83,7 +83,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         },
         .list => |list| {
             string.appendSlice("(") catch @panic("allocator error");
-            for (list.items) |item| {
+            for (list.data.items) |item| {
                 const result = pr_str(item, print_readably);
                 string.appendSlice(result) catch @panic("allocator error");
                 string.appendSlice(" ") catch @panic("allocator error");
@@ -97,7 +97,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         },
         .vector => |vector| {
             string.appendSlice("[") catch @panic("allocator error");
-            for (vector.items) |item| {
+            for (vector.data.items) |item| {
                 const result = pr_str(item, print_readably);
                 string.appendSlice(result) catch @panic("allocator error");
                 string.appendSlice(" ") catch @panic("allocator error");
