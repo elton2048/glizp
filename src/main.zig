@@ -269,7 +269,7 @@ pub const Shell = struct {
         const statement_reader = parsing_statement(statement);
 
         // TODO: Handle deinit the result
-        const result = self.env.apply(statement_reader.ast_root) catch |err| {
+        const result = self.env.apply(statement_reader.ast_root, false) catch |err| {
             utils.log("ERR", err);
             return;
         };
@@ -287,7 +287,7 @@ pub const Shell = struct {
         const statement_reader = parsing_statement(statement);
 
         // TODO: Handle deinit the result
-        const result = self.env.apply(statement_reader.ast_root) catch |err| {
+        const result = self.env.apply(statement_reader.ast_root, false) catch |err| {
             utils.log("ERRR", err);
             return "";
         };
@@ -301,7 +301,7 @@ pub const Shell = struct {
         const load_statement = std.fmt.comptimePrint("(load \"{s}\")", .{INIT_CONFIG_FILE});
         const load_statement_reader = parsing_statement(load_statement);
 
-        const result = self.env.apply(load_statement_reader.ast_root) catch |err| {
+        const result = self.env.apply(load_statement_reader.ast_root, false) catch |err| {
             utils.log("ERR", err);
             return;
         };
@@ -529,7 +529,7 @@ pub const Shell = struct {
     }
 
     fn eval(self: *Shell, item: MalType) !void {
-        const fnValue = self.env.apply(item) catch |err| switch (err) {
+        const fnValue = self.env.apply(item, false) catch |err| switch (err) {
             // Silently suppress the error
             MalTypeError.IllegalType => return,
             else => return err,
