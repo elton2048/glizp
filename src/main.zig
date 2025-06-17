@@ -178,7 +178,7 @@ pub const Shell = struct {
             // zig fmt: on
         };
 
-        return std.fmt.allocPrint(allocator, "{s}-glizp.log", .{date_al.items}) catch |err| switch (err) {
+        return std.fmt.allocPrint(allocator, "glizp-{s}.log", .{date_al.items}) catch |err| switch (err) {
             error.OutOfMemory => @panic("Memory issue"),
         };
     }
