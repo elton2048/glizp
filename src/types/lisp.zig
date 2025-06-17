@@ -40,39 +40,71 @@ pub const MalTypeError = error{
 
 pub const NumberType = f64;
 
-pub const Number = struct {
-    value: NumberType,
+pub const ReferenceCountType = u64;
 
-    pub fn isInteger(self: Number) bool {
+pub const NumberData = struct {
+    value: NumberType,
+    reference_count: ReferenceCountType = 1,
+
+    pub fn isInteger(self: NumberData) bool {
         return @trunc(self.value) == self.value;
     }
 
-    pub fn isFloat(self: Number) bool {
+    pub fn isFloat(self: NumberData) bool {
         return !self.isInteger();
     }
 
-    pub fn integer(self: Number) MalTypeError!i64 {
+    pub fn integer(self: NumberData) MalTypeError!i64 {
         if (!self.isInteger()) {
             return MalTypeError.IllegalType;
         }
         return @intFromFloat(self.value);
     }
 
-    pub fn to_usize(self: Number) MalTypeError!usize {
+    pub fn to_usize(self: NumberData) MalTypeError!usize {
         const int = try self.integer();
         return @as(usize, @intCast(int));
     }
 };
 
+/// An array which is ordered sequence of characters. The basic way
+/// to create is by using double quotes.
+pub const StringData = struct {
+    data: ArrayList(u8),
+    reference_count: ReferenceCountType = 1,
+};
+
+/// As symbol is using slice instead of ArrayList in the current implementation,
+/// they are separated into two types.
+pub const SymbolData = struct {
+    data: ArrayList(u8),
+    reference_count: ReferenceCountType = 1,
+};
+
+pub const ListData = struct {
+    data: List,
+    reference_count: ReferenceCountType = 1,
+};
+
+pub const VectorData = struct {
+    data: Vector,
+    reference_count: ReferenceCountType = 1,
+};
+
+pub const FunctionData = struct {
+    data: *LispEnv,
+    reference_count: ReferenceCountType = 1,
+};
+
 pub const MalType = union(enum) {
     boolean: bool,
-    number: Number,
+    number: NumberData,
     /// An array which is ordered sequence of characters. The basic way
     /// to create is by using double quotes.
-    string: ArrayList(u8),
-    list: List,
+    string: StringData,
+    list: ListData,
     /// Vector type, which provide constant-time element access
-    vector: Vector,
+    vector: VectorData,
     /// General symbol type including function keyword
     symbol: []const u8,
 
@@ -85,22 +117,41 @@ pub const MalType = union(enum) {
     /// Undefined param for function
     Undefined,
 
+    pub fn new_string(data: ArrayList(u8)) MalType {
+        return .{ .string = .{
+            .data = data,
+        } };
+    }
+
+    pub fn new_list(data: List) MalType {
+        return .{ .list = .{
+            .data = data,
+        } };
+    }
+
+    pub fn new_vector(data: Vector) MalType {
+        return .{ .vector = .{
+            .data = data,
+        } };
+    }
+
+    // TODO: Consider add checking for reference count
     pub fn deinit(self: MalType) void {
         switch (self) {
             .string => |string| {
-                string.deinit();
+                string.data.deinit();
             },
             .list => |list| {
-                for (list.items) |item| {
+                for (list.data.items) |item| {
                     item.deinit();
                 }
-                list.deinit();
+                list.data.deinit();
             },
             .vector => |vector| {
-                for (vector.items) |item| {
+                for (vector.data.items) |item| {
                     item.deinit();
                 }
-                vector.deinit();
+                vector.data.deinit();
             },
             // NOTE: Using the root env to deinit, but it seems a bit
             // magical?
@@ -114,8 +165,10 @@ pub const MalType = union(enum) {
     pub fn clone(self: MalType) MalType {
         switch (self) {
             .string => |string| {
-                const new_string = string.clone() catch @panic("OOM");
-                return MalType{ .string = new_string };
+                const original_string = string.data.clone() catch @panic("OOM");
+                return MalType{ .string = .{
+                    .data = original_string,
+                } };
             },
             else => {},
         }
@@ -140,7 +193,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_number(self: MalType) MalTypeError!Number {
+    pub fn as_number(self: MalType) MalTypeError!NumberData {
         switch (self) {
             .number => |num| {
                 return num;
@@ -152,7 +205,7 @@ pub const MalType = union(enum) {
     pub fn as_string(self: MalType) MalTypeError!ArrayList(u8) {
         switch (self) {
             .string => |str| {
-                return str;
+                return str.data;
             },
             else => return MalTypeError.IllegalType,
         }
@@ -161,7 +214,7 @@ pub const MalType = union(enum) {
     pub fn as_list(self: MalType) MalTypeError!ArrayList(MalType) {
         switch (self) {
             .list => |list| {
-                return list;
+                return list.data;
             },
             else => return MalTypeError.IllegalType,
         }
@@ -170,7 +223,7 @@ pub const MalType = union(enum) {
     pub fn as_vector(self: MalType) MalTypeError!Vector {
         switch (self) {
             .vector => |vector| {
-                return vector;
+                return vector.data;
             },
             else => return MalTypeError.IllegalType,
         }
@@ -184,13 +237,31 @@ pub const MalType = union(enum) {
             else => return MalTypeError.IllegalType,
         }
     }
+
+    pub fn incref(self: *MalType) void {
+        // A procedure instead of a function returning its argument
+        // because it must most of the time be applied *after* a
+        // successful assignment.
+        // zig fmt: off
+        switch (self.*) {
+            .list, .vector                => |*l| l.reference_count += 1,
+            .number                       => |*l| l.reference_count += 1,
+            .keyword, .string, .symbol    => |*l| l.reference_count += 1,
+            // .fncore                    => |*l| l.reference_count += 1,
+            // .func                      => |*l| l.reference_count += 1,
+            // .atom                      => |*l| l.reference_count += 1,
+            // .hashmap                   => |*l| l.reference_count += 1,
+            // .nil, .false, .true        => {},
+        }
+        // zig fmt: on
+    }
 };
 
 const MalTypeContext = struct {
     pub fn hash(_: @This(), key: *MalType) u64 {
         return switch (key.*) {
             .symbol => |s| hash_map.hashString(s),
-            .string => |str| hash_map.hashString(str.items),
+            .string => |str| hash_map.hashString(str.data.items),
             else => unreachable,
         };
     }
@@ -202,7 +273,7 @@ const MalTypeContext = struct {
                 else => false,
             },
             .string => |a| switch (mb.*) {
-                .string => |b| hash_map.eqlString(a.items, b.items),
+                .string => |b| hash_map.eqlString(a.data.items, b.data.items),
                 else => false,
             },
             else => unreachable,
@@ -280,13 +351,13 @@ test "LispHashMap" {
     }
 }
 
-test "Number" {
-    const f1 = Number{ .value = 0.2 };
+test "NumberData" {
+    const f1 = NumberData{ .value = 0.2 };
     try testing.expect(!f1.isInteger());
     try testing.expect(f1.isFloat());
     try testing.expectError(MalTypeError.IllegalType, f1.integer());
 
-    const int1 = Number{ .value = 1 };
+    const int1 = NumberData{ .value = 1 };
     try testing.expect(int1.isInteger());
     try testing.expect(!int1.isFloat());
 

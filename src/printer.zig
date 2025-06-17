@@ -41,7 +41,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
             string.appendSlice(result) catch @panic("allocator error");
         },
         .string => |str| {
-            var iter = StringIterator.init(str.items);
+            var iter = StringIterator.init(str.data.items);
 
             // NOTE: In implementing (str) function, the double quotes are
             // extra
@@ -83,7 +83,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         },
         .list => |list| {
             string.appendSlice("(") catch @panic("allocator error");
-            for (list.items) |item| {
+            for (list.data.items) |item| {
                 const result = pr_str(item, print_readably);
                 string.appendSlice(result) catch @panic("allocator error");
                 string.appendSlice(" ") catch @panic("allocator error");
@@ -97,7 +97,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         },
         .vector => |vector| {
             string.appendSlice("[") catch @panic("allocator error");
-            for (vector.items) |item| {
+            for (vector.data.items) |item| {
                 const result = pr_str(item, print_readably);
                 string.appendSlice(result) catch @panic("allocator error");
                 string.appendSlice(" ") catch @panic("allocator error");
@@ -145,7 +145,7 @@ test "printer" {
         const str1_al = initStringArrayList(allocator, "test");
         defer str1_al.deinit();
 
-        const str1 = MalType{ .string = str1_al };
+        const str1 = MalType.new_string(str1_al);
 
         const str1_readably_result = pr_str(str1, true);
         try testing.expectEqualStrings("\"test\"", str1_readably_result);
@@ -155,7 +155,7 @@ test "printer" {
         const str2_al = initStringArrayList(allocator, "te\"st");
         defer str2_al.deinit();
 
-        const str2 = MalType{ .string = str2_al };
+        const str2 = MalType.new_string(str2_al);
 
         // stored value: "te"st"
         // readably result: "te\"st" (escaped doublequote inside)
@@ -168,7 +168,7 @@ test "printer" {
         const str3_al = initStringArrayList(allocator, "\\");
         defer str3_al.deinit();
 
-        const str3 = MalType{ .string = str3_al };
+        const str3 = MalType.new_string(str3_al);
 
         // stored value: "\"
         // readably result: "\\" (escaped backslash inside)
@@ -180,7 +180,7 @@ test "printer" {
         const str4_al = initStringArrayList(allocator, "te\\\"st");
         defer str4_al.deinit();
 
-        const str4 = MalType{ .string = str4_al };
+        const str4 = MalType.new_string(str4_al);
 
         // stored value: "te\"st"
         // readably result: "te\\\"st" (escaped backslash and doublequote inside)
@@ -201,10 +201,10 @@ test "printer" {
         var list1_al = ArrayList(MalType).init(allocator);
         defer list1_al.deinit();
 
-        list1_al.append(MalType{ .string = str1_al }) catch unreachable;
-        list1_al.append(MalType{ .string = str2_al }) catch unreachable;
+        list1_al.append(MalType.new_string(str1_al)) catch unreachable;
+        list1_al.append(MalType.new_string(str2_al)) catch unreachable;
 
-        const list1 = MalType{ .list = list1_al };
+        const list1 = MalType.new_list(list1_al);
         const list1_result = pr_str(list1, true);
 
         try testing.expectEqualStrings("(\"1\" \"2\")", list1_result);
