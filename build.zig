@@ -119,6 +119,7 @@ pub fn build(b: *std.Build) void {
     general_tests.root_module.addImport("logz", logz.module("logz"));
     general_tests.root_module.addImport("regex", regex.module("regex"));
     general_tests.root_module.addImport("xev", xev.module("xev"));
+    general_tests.root_module.addImport("zeit", zeit.module("zeit"));
 
     const run_general_tests = b.addRunArtifact(general_tests);
 
@@ -137,6 +138,7 @@ pub fn build(b: *std.Build) void {
     exe_unit_tests.root_module.addImport("logz", logz.module("logz"));
     exe_unit_tests.root_module.addImport("regex", regex.module("regex"));
     exe_unit_tests.root_module.addImport("xev", xev.module("xev"));
+    exe_unit_tests.root_module.addImport("zeit", zeit.module("zeit"));
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
