@@ -56,7 +56,11 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
 
                 // Handle escape character
                 if (char == '"') {
-                    string.append('\\') catch @panic("allocator error");
+                    if (print_readably) {
+                        // Append backslash to escape double quote
+                        string.appendSlice("\\\"") catch @panic("allocator error");
+                        continue;
+                    }
                 }
 
                 if (char == '\\') {
