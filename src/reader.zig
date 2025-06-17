@@ -379,6 +379,9 @@ pub const Reader = struct {
             };
         } else if (isString) {
             mal = MalType.new_string(str_al);
+            logz.info()
+                .fmt("[LOG]", "str_al result: {any}", .{str_al.items})
+                .log();
         } else {
             mal = MalType{
                 .symbol = token,
