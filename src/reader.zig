@@ -351,6 +351,11 @@ pub const Reader = struct {
                     str_al.append(char) catch unreachable;
 
                     continue;
+                } else if (peek_char == 'n') {
+                    _ = iter.next();
+                    str_al.append('\n') catch unreachable;
+
+                    continue;
                 }
             }
 

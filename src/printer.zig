@@ -47,6 +47,13 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
             // extra
             string.appendSlice("\"") catch @panic("allocator error");
             while (iter.next()) |char| {
+                if (char == 10) {
+                    if (print_readably) {
+                        string.appendSlice("\\n") catch @panic("allocator error");
+                        continue;
+                    }
+                }
+
                 // Handle escape character
                 if (char == '"') {
                     string.append('\\') catch @panic("allocator error");
