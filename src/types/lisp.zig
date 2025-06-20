@@ -117,6 +117,52 @@ pub const MalType = union(enum) {
     /// Undefined param for function
     Undefined,
 
+    pub fn format(self: MalType, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = options;
+
+        if (comptime std.mem.eql(u8, fmt, "")) {
+            try writer.writeAll("LispObject: {");
+
+            switch (self) {
+                .symbol => |symbol| {
+                    try std.fmt.format(writer, ".symbol: '{s}'", .{symbol});
+                },
+                .number => |number| {
+                    try std.fmt.format(writer, ".number: {d}", .{number.value});
+                },
+                .boolean => |boolean| {
+                    try std.fmt.format(writer, ".boolean: {any}", .{boolean});
+                },
+                .SExprEnd,
+                .VectorExprEnd,
+                .Incompleted,
+                .Undefined,
+                => {
+                    switch (@typeInfo(@TypeOf(self))) {
+                        .@"union" => |info| {
+                            if (info.tag_type) |UnionTagType| {
+                                try std.fmt.format(writer, ".{s}", .{@tagName(@as(UnionTagType, self))});
+                            }
+                        },
+                        else => unreachable,
+                    }
+                },
+                // NOTE: This is no way to use default format now as
+                // the implementation checks the struct has format
+                // method or not
+                // TODO: To be implemented
+                .string,
+                .list,
+                .vector,
+                => {},
+                else => {
+                    try std.fmt.format(writer, "{any!}", .{self});
+                },
+            }
+            try writer.writeAll("}");
+        }
+    }
+
     pub fn new_string(data: ArrayList(u8)) MalType {
         return .{ .string = .{
             .data = data,
@@ -254,6 +300,17 @@ pub const MalType = union(enum) {
             // .nil, .false, .true        => {},
         }
         // zig fmt: on
+    }
+
+    pub fn decref(self: *MalType) void {
+        switch (self.*) {
+            .keyword, .string, .symbol => |*l| {
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+        }
     }
 };
 

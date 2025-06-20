@@ -64,6 +64,10 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).init
     // to a queue and consumed in a loop. This architecture is expected
     // to be expanded for plugin usage.
     .{ "msg-append", &messageAppend },
+
+    // For debug usage, consider adding flag to include only in certain
+    // build later
+    .{ "debug-log-data", &debugLogDataFunc },
 });
 
 /// Tail optimization implementation requires more testing and evaluation
@@ -87,6 +91,14 @@ pub const FunctionWithAttributes = struct {
 
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
+
+fn debugLogDataFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+    _ = params;
+
+    env.logData();
+
+    return MalType{ .boolean = false };
+}
 
 fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     var list = ArrayList(MalType).init(env.allocator);
@@ -734,6 +746,36 @@ pub const LispEnv = struct {
                 .fmt("[LISP_ENV]", "fnTable fn: '{s}' set.", .{symbol})
                 .level(.Debug)
                 .log();
+        }
+    }
+
+    pub fn logPredefinedLispFn(self: *Self) void {
+        var newfnTableIter = self.data.iterator();
+        while (newfnTableIter.next()) |kv| {
+            if (kv.value_ptr.* == .function) {
+                logz.info()
+                    .fmt("[LISP_ENV]", "predefined fn: '{s}' set.", .{kv.key_ptr.*})
+                    .level(.Debug)
+                    .log();
+            }
+        }
+    }
+
+    /// Log the data in the env
+    pub fn logData(self: *Self) void {
+        logz.info()
+            .fmt("[LISP_ENV]", "env data", .{})
+            .level(.Debug)
+            .log();
+
+        var dataIter = self.data.iterator();
+        while (dataIter.next()) |kv| {
+            if (kv.value_ptr.* != .function) {
+                logz.info()
+                    .fmt("[LISP_ENV]", "data - '{s}': '{any}'", .{ kv.key_ptr.*, kv.value_ptr.* })
+                    .level(.Debug)
+                    .log();
+            }
         }
     }
 
