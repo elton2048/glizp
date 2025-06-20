@@ -65,15 +65,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
 
                 if (char == '\\') {
                     if (iter.peek()) |peek| {
-                        if (peek == 'n') {
-                            if (print_readably) {
-                                string.appendSlice("\\n") catch @panic("allocator error");
-                            } else {
-                                string.append('\n') catch @panic("allocator error");
-                            }
-                            _ = iter.next();
-                            continue;
-                        } else if (peek == '\\') {
+                        if (peek == '\\') {
                             if (print_readably) {
                                 string.append('\\') catch @panic("allocator error");
                             } else {
