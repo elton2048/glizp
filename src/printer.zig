@@ -43,26 +43,29 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
         .string => |str| {
             var iter = StringIterator.init(str.data.items);
 
-            // NOTE: In implementing (str) function, the double quotes are
-            // extra
-            string.appendSlice("\"") catch @panic("allocator error");
+            if (print_readably) {
+                string.appendSlice("\"") catch @panic("allocator error");
+            }
             while (iter.next()) |char| {
+                if (char == 10) {
+                    if (print_readably) {
+                        string.appendSlice("\\n") catch @panic("allocator error");
+                        continue;
+                    }
+                }
+
                 // Handle escape character
                 if (char == '"') {
-                    string.append('\\') catch @panic("allocator error");
+                    if (print_readably) {
+                        // Append backslash to escape double quote
+                        string.appendSlice("\\\"") catch @panic("allocator error");
+                        continue;
+                    }
                 }
 
                 if (char == '\\') {
                     if (iter.peek()) |peek| {
-                        if (peek == 'n') {
-                            if (print_readably) {
-                                string.appendSlice("\\n") catch @panic("allocator error");
-                            } else {
-                                string.append('\n') catch @panic("allocator error");
-                            }
-                            _ = iter.next();
-                            continue;
-                        } else if (peek == '\\') {
+                        if (peek == '\\') {
                             if (print_readably) {
                                 string.append('\\') catch @panic("allocator error");
                             } else {
@@ -79,7 +82,9 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
 
                 string.append(char) catch @panic("allocator error");
             }
-            string.appendSlice("\"") catch @panic("allocator error");
+            if (print_readably) {
+                string.appendSlice("\"") catch @panic("allocator error");
+            }
         },
         .list => |list| {
             string.appendSlice("(") catch @panic("allocator error");
@@ -150,7 +155,7 @@ test "printer" {
         const str1_readably_result = pr_str(str1, true);
         try testing.expectEqualStrings("\"test\"", str1_readably_result);
         const str1_non_readably_result = pr_str(str1, false);
-        try testing.expectEqualStrings("\"test\"", str1_non_readably_result);
+        try testing.expectEqualStrings("test", str1_non_readably_result);
 
         const str2_al = initStringArrayList(allocator, "te\"st");
         defer str2_al.deinit();
@@ -163,7 +168,7 @@ test "printer" {
         try testing.expectEqualStrings("\"te\\\"st\"", str2_readably_result);
         // TODO: No different currently
         const str2_non_readably_result = pr_str(str2, false);
-        try testing.expectEqualStrings("\"te\\\"st\"", str2_non_readably_result);
+        try testing.expectEqualStrings("te\"st", str2_non_readably_result);
 
         const str3_al = initStringArrayList(allocator, "\\");
         defer str3_al.deinit();
