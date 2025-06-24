@@ -117,6 +117,67 @@ pub const MalType = union(enum) {
     /// Undefined param for function
     Undefined,
 
+    pub fn format(self: MalType, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = options;
+
+        if (comptime std.mem.eql(u8, fmt, "")) {
+            try writer.writeAll("LispObject: {");
+
+            switch (self) {
+                .symbol => |symbol| {
+                    try std.fmt.format(writer, ".symbol: '{s}'", .{symbol});
+                },
+                .number => |number| {
+                    try std.fmt.format(writer, ".number: {d}", .{number.value});
+                },
+                .boolean => |boolean| {
+                    try std.fmt.format(writer, ".boolean: {any}", .{boolean});
+                },
+                .SExprEnd,
+                .VectorExprEnd,
+                .Incompleted,
+                .Undefined,
+                => {
+                    switch (@typeInfo(@TypeOf(self))) {
+                        .@"union" => |info| {
+                            if (info.tag_type) |UnionTagType| {
+                                try std.fmt.format(writer, ".{s}", .{@tagName(@as(UnionTagType, self))});
+                            }
+                        },
+                        else => unreachable,
+                    }
+                },
+                .string => |string| {
+                    try std.fmt.format(writer, ".string: '{s}'", .{string.data.items});
+                },
+                .list => |list| {
+                    // TODO: Need level control, limit or better formatting?
+                    try std.fmt.format(writer, ".list: ", .{});
+                    for (list.data.items, 0..) |item, i| {
+                        try writer.writeAll("{ ");
+                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                        try writer.writeAll(" }");
+                    }
+                },
+                .vector => |vector| {
+                    try std.fmt.format(writer, ".vector: ", .{});
+                    for (vector.data.items, 0..) |item, i| {
+                        try writer.writeAll("{ ");
+                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                        try writer.writeAll(" }");
+                    }
+                },
+                // NOTE: This is no way to use default format now as
+                // the implementation checks if the struct has "format"
+                // method or not for custom formatting
+                else => {
+                    try std.fmt.format(writer, "{any!}", .{self});
+                },
+            }
+            try writer.writeAll("}");
+        }
+    }
+
     pub fn new_string(data: ArrayList(u8)) MalType {
         return .{ .string = .{
             .data = data,
