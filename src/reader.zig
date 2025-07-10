@@ -15,6 +15,7 @@ const MalTypeError = lisp.MalTypeError;
 const StringIterator = iterator.StringIterator;
 
 const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const debug = std.debug;
 
 const BOOLEAN_MAP = @import("semantic.zig").BOOLEAN_MAP;
@@ -56,7 +57,7 @@ const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\\\.|[^\\\\\"])*
 /// Reader object
 pub const Reader = struct {
     allocator: std.mem.Allocator,
-    tokens: ArrayList(Token),
+    tokens: ArrayListUnmanaged(Token),
     token_curr: usize,
     ast_root: *MalType,
 
@@ -73,7 +74,7 @@ pub const Reader = struct {
     pub fn deinit(self: *Reader) void {
         utils.log("reader deinit ast_root before", "{any}", .{self.ast_root}, .{ .color = .BrightRed, .test_only = true });
 
-        self.tokens.deinit();
+        self.tokens.deinit(self.allocator);
         self.ast_root.decref();
         self.allocator.destroy(self);
     }
@@ -83,7 +84,7 @@ pub const Reader = struct {
         // var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
         // const allocator = gpa_allocator.allocator();
 
-        const tokens = ArrayList(Token).init(allocator);
+        const tokens: ArrayListUnmanaged(Token) = .empty;
 
         // NOTE: Create a pointer that requires `destroy` afterwards
         const self = allocator.create(Reader) catch @panic("OOM");
@@ -133,7 +134,7 @@ pub const Reader = struct {
                 // is mutable normally, however this case gets the result
                 // from struct which is const (now). Might need further
                 // check to see if this implemenation is ok or not.
-                @constCast(&self.*.tokens).append(result.sliceAt(1).?) catch unreachable;
+                @constCast(&self.tokens).append(self.allocator, result.sliceAt(1).?) catch unreachable;
             } else {
                 // No match case
                 statement_curr = statement_end_pos;
