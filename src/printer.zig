@@ -4,7 +4,7 @@ const logz = @import("logz");
 const utils = @import("utils.zig");
 
 const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 const debug = std.debug;
 const mem = std.mem;
 
@@ -24,32 +24,32 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa_allocator.allocator();
 
-    var string = ArrayList(u8).init(allocator);
-    defer string.deinit();
+    var string: ArrayList(u8) = .empty;
+    defer string.deinit(allocator);
 
     switch (mal.*) {
         .boolean => |boolean| {
             if (boolean) {
-                string.appendSlice(BOOLEAN_TRUE) catch @panic("allocator error");
+                string.appendSlice(allocator, BOOLEAN_TRUE) catch @panic("allocator error");
             } else {
-                string.appendSlice(BOOLEAN_FALSE) catch @panic("allocator error");
+                string.appendSlice(allocator, BOOLEAN_FALSE) catch @panic("allocator error");
             }
         },
         .number => |value| {
             const result = std.fmt.allocPrint(allocator, "{d}", .{value.value}) catch @panic("allocator error");
             defer allocator.free(result);
-            string.appendSlice(result) catch @panic("allocator error");
+            string.appendSlice(allocator, result) catch @panic("allocator error");
         },
         .string => |str| {
             var iter = StringIterator.init(str.data.items);
 
             if (print_readably) {
-                string.appendSlice("\"") catch @panic("allocator error");
+                string.appendSlice(allocator, "\"") catch @panic("allocator error");
             }
             while (iter.next()) |char| {
                 if (char == 10) {
                     if (print_readably) {
-                        string.appendSlice("\\n") catch @panic("allocator error");
+                        string.appendSlice(allocator, "\\n") catch @panic("allocator error");
                         continue;
                     }
                 }
@@ -58,7 +58,7 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
                 if (char == '"') {
                     if (print_readably) {
                         // Append backslash to escape double quote
-                        string.appendSlice("\\\"") catch @panic("allocator error");
+                        string.appendSlice(allocator, "\\\"") catch @panic("allocator error");
                         continue;
                     }
                 }
@@ -67,7 +67,7 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
                     if (iter.peek()) |peek| {
                         if (peek == '\\') {
                             if (print_readably) {
-                                string.append('\\') catch @panic("allocator error");
+                                string.append(allocator, '\\') catch @panic("allocator error");
                             } else {
                                 // TODO: Handle non print_readably case
                             }
@@ -76,53 +76,53 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
                         // NOTE: For single "\" case in data
                         // For multiple backslash case, there could be
                         // more data in iterator.
-                        string.append('\\') catch @panic("allocator error");
+                        string.append(allocator, '\\') catch @panic("allocator error");
                     }
                 }
 
-                string.append(char) catch @panic("allocator error");
+                string.append(allocator, char) catch @panic("allocator error");
             }
             if (print_readably) {
-                string.appendSlice("\"") catch @panic("allocator error");
+                string.appendSlice(allocator, "\"") catch @panic("allocator error");
             }
         },
         .list => |list| {
-            string.appendSlice("(") catch @panic("allocator error");
+            string.appendSlice(allocator, "(") catch @panic("allocator error");
             for (list.data.items) |item| {
                 const result = pr_str(item, print_readably);
-                string.appendSlice(result) catch @panic("allocator error");
-                string.appendSlice(" ") catch @panic("allocator error");
+                string.appendSlice(allocator, result) catch @panic("allocator error");
+                string.appendSlice(allocator, " ") catch @panic("allocator error");
             }
             // Remove the last space
             _ = string.pop();
-            string.appendSlice(")") catch @panic("allocator error");
+            string.appendSlice(allocator, ")") catch @panic("allocator error");
         },
         .function => |_| {
-            string.appendSlice("#<function>") catch @panic("allocator error");
+            string.appendSlice(allocator, "#<function>") catch @panic("allocator error");
         },
         .vector => |vector| {
-            string.appendSlice("[") catch @panic("allocator error");
+            string.appendSlice(allocator, "[") catch @panic("allocator error");
             for (vector.data.items) |item| {
                 const result = pr_str(item, print_readably);
-                string.appendSlice(result) catch @panic("allocator error");
-                string.appendSlice(" ") catch @panic("allocator error");
+                string.appendSlice(allocator, result) catch @panic("allocator error");
+                string.appendSlice(allocator, " ") catch @panic("allocator error");
             }
             // Remove the last space
             _ = string.pop();
-            string.appendSlice("]") catch @panic("allocator error");
+            string.appendSlice(allocator, "]") catch @panic("allocator error");
         },
         .symbol => |symbol| {
-            string.appendSlice(symbol.data) catch @panic("allocator error");
+            string.appendSlice(allocator, symbol.data) catch @panic("allocator error");
         },
         else => {},
     }
 
-    return string.toOwnedSlice() catch unreachable;
+    return string.toOwnedSlice(allocator) catch unreachable;
 }
 
 fn initStringArrayList(allocator: mem.Allocator, str: []const u8) ArrayList(u8) {
-    var al = ArrayList(u8).init(allocator);
-    al.appendSlice(str) catch unreachable;
+    var al: ArrayList(u8) = .empty;
+    al.appendSlice(allocator, str) catch unreachable;
 
     return al;
 }
