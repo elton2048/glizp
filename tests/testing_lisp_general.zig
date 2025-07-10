@@ -1,6 +1,8 @@
 /// Integration test for a complete flow from reading lisp statement to
 /// verifying the result.
 /// Consider this as examples how the lisp syntax works
+/// NOTE: Migrating the env using pointer, these tests leave as reference
+/// now.
 const std = @import("std");
 const logz = @import("logz");
 
@@ -102,6 +104,23 @@ test "def function - with list eval case" {
 
     const result = printer.pr_str(def_statment_value, true);
     try testing.expectEqualStrings("3", result);
+}
+
+test "def function - multiple list case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var def_statment = Reader.init(allocator, "(def! a (list (list 1 2 3) 4))");
+    defer def_statment.deinit();
+
+    try testing.expect(def_statment.ast_root == .list);
+
+    const def_statment_value = try env.apply(def_statment.ast_root, false);
+
+    const result = printer.pr_str(def_statment_value, true);
+    try testing.expectEqualStrings("((1 2 3) 4)", result);
 }
 
 test "let* function - simple case" {

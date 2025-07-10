@@ -23,7 +23,7 @@ const EVAL_TABLE = std.StaticStringMap(LispFunctionWithOpaque).initComptime(.{
     .{ "delete-backward-char", &deleteBackwardChar },
 });
 
-fn forwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn forwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     var steps: lisp.NumberData = undefined;
 
     if (params.len > 0) {
@@ -57,10 +57,10 @@ fn forwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const steps_value = try steps.to_usize();
     self.movePoint(steps_value, true);
 
-    return .{ .boolean = false };
+    return @constCast(&MalType{ .boolean = false });
 }
 
-fn backwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn backwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     var steps: lisp.NumberData = undefined;
 
     if (params.len > 0) {
@@ -82,10 +82,10 @@ fn backwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const steps_value = try steps.to_usize();
     self.movePoint(steps_value, false);
 
-    return .{ .boolean = false };
+    return @constCast(&MalType{ .boolean = false });
 }
 
-fn insert(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn insert(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     const bytes = try params[0].as_string();
 
     const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
@@ -104,10 +104,10 @@ fn insert(params: []MalType, env: *anyopaque) MalTypeError!MalType {
 
     // Corresponds to nil
     // TODO: See if extract this as a new type like Qnil.
-    return MalType{ .boolean = false };
+    return @constCast(&MalType{ .boolean = false });
 }
 
-fn deleteChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn deleteChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
 
     if (pluginEnv.buffer.items.len > 0 and
@@ -131,10 +131,10 @@ fn deleteChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
         };
     }
 
-    return MalType{ .boolean = false };
+    return @constCast(&MalType{ .boolean = false });
 }
 
-fn deleteBackwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn deleteBackwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     const pluginEnv: *PluginEditing = @ptrCast(@alignCast(env));
 
     if (pluginEnv.buffer.items.len > 0 and pluginEnv.pos > 0) {
@@ -160,7 +160,7 @@ fn deleteBackwardChar(params: []MalType, env: *anyopaque) MalTypeError!MalType {
         };
     }
 
-    return MalType{ .boolean = false };
+    return @constCast(&MalType{ .boolean = false });
 }
 
 pub const PluginEditing = struct {
