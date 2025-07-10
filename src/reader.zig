@@ -332,7 +332,7 @@ pub const Reader = struct {
     /// which could be boolean, number, string or symbol.
     /// This returns the lisp object.
     pub fn read_atom(self: *Reader, token: Token) *MalType {
-        var str_al = ArrayList(u8).init(self.allocator);
+        var str_al: ArrayListUnmanaged(u8) = .empty;
 
         var iter = StringIterator.init(token);
 
@@ -371,18 +371,18 @@ pub const Reader = struct {
                     continue;
                 } else if (peek_char == '\\') {
                     _ = iter.next();
-                    str_al.append(char) catch unreachable;
+                    str_al.append(self.allocator, char) catch unreachable;
 
                     continue;
                 } else if (peek_char == 'n') {
                     _ = iter.next();
-                    str_al.append('\n') catch unreachable;
+                    str_al.append(self.allocator, '\n') catch unreachable;
 
                     continue;
                 }
             }
 
-            str_al.append(char) catch unreachable;
+            str_al.append(self.allocator, char) catch unreachable;
         }
         const isBoolean = BOOLEAN_MAP.get(token);
 

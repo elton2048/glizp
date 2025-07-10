@@ -4,6 +4,7 @@ const hash_map = std.hash_map;
 const Allocator = std.mem.Allocator;
 
 const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const HashMap = hash_map.HashMap;
 
 const utils = @import("../utils.zig");
@@ -78,7 +79,7 @@ pub const NumberData = struct {
 /// to create is by using double quotes.
 pub const StringData = struct {
     allocator: ?std.mem.Allocator = null,
-    data: ArrayList(u8),
+    data: ArrayListUnmanaged(u8),
     reference_count: ReferenceCountType = 1,
 };
 
@@ -217,13 +218,13 @@ pub const MalType = union(enum) {
         return FALSE.*;
     }
 
-    pub fn new_string(data: ArrayList(u8)) MalType {
+    pub fn new_string(data: ArrayListUnmanaged(u8)) MalType {
         return .{ .string = .{
             .data = data,
         } };
     }
 
-    pub fn new_string_ptr(allocator: std.mem.Allocator, data: ArrayList(u8)) *MalType {
+    pub fn new_string_ptr(allocator: std.mem.Allocator, data: ArrayListUnmanaged(u8)) *MalType {
         const mal_ptr = allocator.create(MalType) catch @panic("OOM");
         mal_ptr.* = .{ .string = .{
             .allocator = allocator,
@@ -315,9 +316,10 @@ pub const MalType = union(enum) {
                     allocator.destroy(self);
                 }
             },
-            .string => |string| {
-                string.data.deinit();
+            .string => |*string| {
                 if (string.allocator) |allocator| {
+                    string.data.deinit(allocator);
+
                     allocator.destroy(self);
                 }
             },
@@ -369,11 +371,7 @@ pub const MalType = union(enum) {
         var new_object: *MalType = undefined;
         switch (self.*) {
             .string => |string| {
-                var original_data = string.data;
-                var original_data_unmanaged = original_data.moveToUnmanaged();
-
-                var new_data_unmanaged = original_data_unmanaged.clone(allocator) catch @panic("");
-                const new_data = new_data_unmanaged.toManaged(allocator);
+                const new_data = string.data.clone(allocator) catch @panic("");
 
                 new_object = MalType.new_string_ptr(allocator, new_data);
             },
@@ -422,7 +420,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_string(self: MalType) MalTypeError!ArrayList(u8) {
+    pub fn as_string(self: MalType) MalTypeError!ArrayListUnmanaged(u8) {
         switch (self) {
             .string => |str| {
                 return str.data;

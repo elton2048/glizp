@@ -7,6 +7,7 @@ const logz = @import("logz");
 const xev = @import("xev");
 
 const ArrayList = std.ArrayList;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 
 const data = @import("data_ptr.zig");
 const utils = @import("utils.zig");
@@ -239,7 +240,7 @@ fn fsLoadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
         else => return MalTypeError.Unhandled,
     };
 
-    const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
+    const al_result = ArrayListUnmanaged(u8).fromOwnedSlice(result);
 
     const mal_ptr = env.allocator.create(MalType) catch @panic("OOM");
     mal_ptr.* = MalType.new_string(al_result);
