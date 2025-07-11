@@ -3,8 +3,7 @@ const builtin = @import("builtin");
 const hash_map = std.hash_map;
 const Allocator = std.mem.Allocator;
 
-const ArrayList = std.ArrayList;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayListUnmanaged;
 const HashMap = hash_map.HashMap;
 
 const utils = @import("../utils.zig");
@@ -79,7 +78,7 @@ pub const NumberData = struct {
 /// to create is by using double quotes.
 pub const StringData = struct {
     allocator: ?std.mem.Allocator = null,
-    data: ArrayListUnmanaged(u8),
+    data: ArrayList(u8),
     reference_count: ReferenceCountType = 1,
 };
 
@@ -218,13 +217,13 @@ pub const MalType = union(enum) {
         return FALSE.*;
     }
 
-    pub fn new_string(data: ArrayListUnmanaged(u8)) MalType {
+    pub fn new_string(data: ArrayList(u8)) MalType {
         return .{ .string = .{
             .data = data,
         } };
     }
 
-    pub fn new_string_ptr(allocator: std.mem.Allocator, data: ArrayListUnmanaged(u8)) *MalType {
+    pub fn new_string_ptr(allocator: std.mem.Allocator, data: ArrayList(u8)) *MalType {
         const mal_ptr = allocator.create(MalType) catch @panic("OOM");
         mal_ptr.* = .{ .string = .{
             .allocator = allocator,
@@ -323,19 +322,19 @@ pub const MalType = union(enum) {
                     allocator.destroy(self);
                 }
             },
-            .list => |list| {
+            .list => |*list| {
                 for (list.data.items) |item| {
                     item.decref();
                 }
-                list.data.deinit();
+                list.data.deinit(list.allocator);
 
                 list.allocator.destroy(self);
             },
-            .vector => |vector| {
+            .vector => |*vector| {
                 for (vector.data.items) |item| {
                     item.deinit();
                 }
-                vector.data.deinit();
+                vector.data.deinit(vector.allocator);
 
                 vector.allocator.destroy(self);
             },
@@ -420,7 +419,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_string(self: MalType) MalTypeError!ArrayListUnmanaged(u8) {
+    pub fn as_string(self: MalType) MalTypeError!ArrayList(u8) {
         switch (self) {
             .string => |str| {
                 return str.data;
@@ -429,7 +428,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_list(self: MalType) MalTypeError!ArrayList(*MalType) {
+    pub fn as_list(self: MalType) MalTypeError!List {
         switch (self) {
             .list => |list| {
                 return list.data;
@@ -456,7 +455,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_list_ptr(self: MalType) MalTypeError!ArrayList(*MalType) {
+    pub fn as_list_ptr(self: MalType) MalTypeError!List {
         switch (self) {
             .list => |list| {
                 return list.data;

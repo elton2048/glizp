@@ -167,13 +167,13 @@ fn listLikeFunc(params: *MalType) MalTypeError!*MalType {
 }
 
 fn listFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
-    var list = ArrayList(*MalType).init(env.allocator);
+    var list: lisp.List = .empty;
 
     for (params) |param| {
         const mal_param = param;
         mal_param.incref();
         utils.log("listFunc", "{*}; {any}", .{ mal_param, mal_param }, .{ .color = .Green });
-        list.append(mal_param) catch @panic("test");
+        list.append(env.allocator, mal_param) catch @panic("test");
     }
 
     const mal = MalType.new_list_ptr(env.allocator, list);
@@ -197,9 +197,9 @@ fn isListFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
 }
 
 fn vectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
-    var vector = ArrayList(*MalType).init(env.allocator);
+    var vector: lisp.List = .empty;
 
-    vector.insertSlice(0, params) catch |err| switch (err) {
+    vector.insertSlice(env.allocator, 0, params) catch |err| switch (err) {
         error.OutOfMemory => return MalTypeError.IllegalType,
     };
 

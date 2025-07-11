@@ -14,8 +14,7 @@ const MalTypeError = lisp.MalTypeError;
 
 const StringIterator = iterator.StringIterator;
 
-const ArrayList = std.ArrayList;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayListUnmanaged;
 const debug = std.debug;
 
 const BOOLEAN_MAP = @import("semantic.zig").BOOLEAN_MAP;
@@ -57,19 +56,9 @@ const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\\\.|[^\\\\\"])*
 /// Reader object
 pub const Reader = struct {
     allocator: std.mem.Allocator,
-    tokens: ArrayListUnmanaged(Token),
+    tokens: ArrayList(Token),
     token_curr: usize,
     ast_root: *MalType,
-
-    fn createList(self: Reader) List {
-        const list = List.init(self.allocator);
-
-        errdefer {
-            self.allocator.destroy(list);
-        }
-
-        return list;
-    }
 
     pub fn deinit(self: *Reader) void {
         utils.log("reader deinit ast_root before", "{any}", .{self.ast_root}, .{ .color = .BrightRed, .test_only = true });
@@ -84,7 +73,7 @@ pub const Reader = struct {
         // var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
         // const allocator = gpa_allocator.allocator();
 
-        const tokens: ArrayListUnmanaged(Token) = .empty;
+        const tokens: ArrayList(Token) = .empty;
 
         // NOTE: Create a pointer that requires `destroy` afterwards
         const self = allocator.create(Reader) catch @panic("OOM");
@@ -236,14 +225,14 @@ pub const Reader = struct {
     // As the list is not expected to be expanded, return slice instead
     // of array list.
     pub fn read_list(self: *Reader) !ArrayList(*MalType) {
-        var list = self.createList();
+        var list: ArrayList(*MalType) = .empty;
         errdefer {
             // For incompleted list case, the parsed elements require
             // deinited.
             for (list.items) |item| {
                 item.deinit();
             }
-            list.deinit();
+            list.deinit(self.allocator);
         }
 
         var end = false;
@@ -261,7 +250,7 @@ pub const Reader = struct {
                     break;
                 },
                 else => {
-                    try list.append(malType);
+                    try list.append(self.allocator, malType);
                 },
             }
         } else |err| {
@@ -285,15 +274,16 @@ pub const Reader = struct {
     /// Reading vector from string, it appends a "vector" symbol at the
     /// beginning of the list then append all items within bracket to
     /// create vector data structure.
-    pub fn read_vector(self: *Reader) !ArrayList(*MalType) {
-        var list = self.createList();
+    // TODO: Need to handle double free vector case in running main program
+    pub fn read_vector(self: *Reader) !Vector {
+        var list: Vector = .empty;
         errdefer {
-            list.deinit();
+            list.deinit(self.allocator);
         }
 
         var end = false;
         const vectorLisp = MalType.new_symbol(self.allocator, "vector");
-        try list.append(@constCast(vectorLisp));
+        try list.append(self.allocator, @constCast(vectorLisp));
         while (self.next()) |_| {
             const malType = self.read_form();
 
@@ -308,7 +298,7 @@ pub const Reader = struct {
                     break;
                 },
                 else => {
-                    try list.append(malType);
+                    try list.append(self.allocator, malType);
                 },
             }
         } else |err| {
@@ -332,7 +322,7 @@ pub const Reader = struct {
     /// which could be boolean, number, string or symbol.
     /// This returns the lisp object.
     pub fn read_atom(self: *Reader, token: Token) *MalType {
-        var str_al: ArrayListUnmanaged(u8) = .empty;
+        var str_al: ArrayList(u8) = .empty;
 
         var iter = StringIterator.init(token);
 
