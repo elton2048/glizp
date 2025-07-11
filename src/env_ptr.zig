@@ -260,7 +260,7 @@ fn loadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     // getting key "a" returns no value.
     const file_content = try fsLoadFunc(params, env);
 
-    env.internalData.append(file_content) catch |err| switch (err) {
+    env.internalData.append(env.allocator, file_content) catch |err| switch (err) {
         // TODO: Meaningful error for such case
         error.OutOfMemory => return MalTypeError.Unhandled,
     };
@@ -282,7 +282,7 @@ pub const LispEnv = struct {
     data: std.StringHashMap(*MalType),
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
     // Internal storage for data parsed outside
-    internalData: ArrayList(*MalType),
+    internalData: ArrayListUnmanaged(*MalType),
     // Data collection point which holds the reference, intends to be a
     // garbage collector.
     dataCollector: PrefixStringHashMap(*MalType),
@@ -369,7 +369,7 @@ pub const LispEnv = struct {
             fnTable.put(entry.key_ptr.*, entry.value_ptr.*) catch @panic("OOM");
         }
 
-        const internalData = ArrayList(*MalType).init(allocator);
+        const internalData: ArrayListUnmanaged(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
@@ -454,7 +454,7 @@ pub const LispEnv = struct {
         for (self.internalData.items) |item| {
             item.deinit();
         }
-        self.internalData.deinit();
+        self.internalData.deinit(self.allocator);
         var iter = self.dataCollector.iterator();
         while (iter.next()) |item| {
             // Only free those with implicit keys. i.e. not created from user
@@ -486,7 +486,7 @@ pub const LispEnv = struct {
         readFromFnMap(LispFunctionPtrWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
         // readFromFnMap(LispFunctionWithTail, fnTable, SPECIAL_ENV_WITH_TAIL_EVAL_TABLE, STOCK_REFERENCE);
 
-        const internalData = ArrayList(*MalType).init(allocator);
+        const internalData: ArrayListUnmanaged(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
