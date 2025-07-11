@@ -13,7 +13,7 @@ const printer = @import("printer.zig");
 const data = @import("data.zig");
 const lisp = @import("types/lisp.zig");
 
-const ArrayList = std.ArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 const Reader = token_reader.Reader;
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
@@ -163,10 +163,10 @@ pub const Shell = struct {
         };
         const dt_now = now.time();
 
-        var date_al = ArrayList(u8).init(allocator);
-        defer date_al.deinit();
+        var date_al: ArrayList(u8) = .empty;
+        defer date_al.deinit(allocator);
 
-        dt_now.strftime(date_al.writer(), "%Y-%m-%d") catch |err| switch (err) {
+        dt_now.strftime(date_al.writer(allocator), "%Y-%m-%d") catch |err| switch (err) {
             error.InvalidFormat => @panic("InvalidFormat"),
             error.Overflow => @panic("Year overflow"),
             error.UnsupportedSpecifier => @panic("Unexpected UnsupportedSpecifier error, check the original library"),
