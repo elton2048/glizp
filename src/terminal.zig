@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const ArrayList = std.ArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 
 const utils = @import("utils.zig");
 
@@ -150,9 +150,9 @@ pub const Terminal = struct {
         // TEMP: For newline case, default to insert at the end for
         // easier handling; The pos reserves for moving only.
         if (byte == '\n') {
-            try self.buffer.insert(self.buffer.items.len, byte);
+            try self.buffer.insert(self.allocator, self.buffer.items.len, byte);
         } else {
-            try self.buffer.insert(pos, byte);
+            try self.buffer.insert(self.allocator, pos, byte);
         }
 
         {
@@ -287,7 +287,7 @@ pub const Terminal = struct {
             return;
         }
         // Modify the underlying buffer
-        _ = try self.buffer.replaceRange(posStart, charbefore, modification.?);
+        _ = try self.buffer.replaceRange(self.allocator, posStart, charbefore, modification.?);
 
         const stdout_file = self.stdout.writer();
         var bw = std.io.bufferedWriter(stdout_file);
@@ -401,13 +401,15 @@ pub const Terminal = struct {
 
     pub fn init(allocator: std.mem.Allocator) *Terminal {
         const self = allocator.create(Terminal) catch @panic("OOM");
-        const buffer = ArrayList(u8).init(allocator);
+        var buffer: ArrayList(u8) = .empty;
         const stdin = std.io.getStdIn();
         const stdin_fd = stdin.handle;
 
         const orig_termios = posix.tcgetattr(stdin_fd) catch @panic("Cannot access termios");
         var prog_termios: posix.termios = undefined;
         prog_termios = orig_termios;
+
+        defer buffer.deinit(allocator);
 
         self.* = Terminal{
             .allocator = allocator,
