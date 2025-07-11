@@ -6,8 +6,7 @@ const logz = @import("logz");
 
 const xev = @import("xev");
 
-const ArrayList = std.ArrayList;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
+const ArrayList = std.ArrayListUnmanaged;
 
 const data = @import("data_ptr.zig");
 const utils = @import("utils.zig");
@@ -240,7 +239,7 @@ fn fsLoadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
         else => return MalTypeError.Unhandled,
     };
 
-    const al_result = ArrayListUnmanaged(u8).fromOwnedSlice(result);
+    const al_result = ArrayList(u8).fromOwnedSlice(result);
 
     const mal_ptr = env.allocator.create(MalType) catch @panic("OOM");
     mal_ptr.* = MalType.new_string(al_result);
@@ -282,7 +281,7 @@ pub const LispEnv = struct {
     data: std.StringHashMap(*MalType),
     fnTable: lisp.LispHashMap(FunctionWithAttributes),
     // Internal storage for data parsed outside
-    internalData: ArrayListUnmanaged(*MalType),
+    internalData: ArrayList(*MalType),
     // Data collection point which holds the reference, intends to be a
     // garbage collector.
     dataCollector: PrefixStringHashMap(*MalType),
@@ -369,7 +368,7 @@ pub const LispEnv = struct {
             fnTable.put(entry.key_ptr.*, entry.value_ptr.*) catch @panic("OOM");
         }
 
-        const internalData: ArrayListUnmanaged(*MalType) = .empty;
+        const internalData: ArrayList(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
@@ -486,7 +485,7 @@ pub const LispEnv = struct {
         readFromFnMap(LispFunctionPtrWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
         // readFromFnMap(LispFunctionWithTail, fnTable, SPECIAL_ENV_WITH_TAIL_EVAL_TABLE, STOCK_REFERENCE);
 
-        const internalData: ArrayListUnmanaged(*MalType) = .empty;
+        const internalData: ArrayList(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
@@ -586,7 +585,7 @@ pub const LispEnv = struct {
                     const lambda_func_run_checker: bool = true;
                     const allocator = self.allocator;
 
-                    var ptr_params = ArrayList(*MalType).init(allocator);
+                    var ptr_params: ArrayList(*MalType) = .empty;
                     defer {
                         logz.info()
                             .fmt("[apply] deinit", "", .{})
@@ -607,7 +606,7 @@ pub const LispEnv = struct {
                             }
                         }
                         // ---------------
-                        ptr_params.deinit();
+                        ptr_params.deinit(allocator);
                     }
 
                     for (list.data.items, 0..) |mal_item, i| {
@@ -705,7 +704,7 @@ pub const LispEnv = struct {
                             }
                         }
 
-                        ptr_params.append(mal_ptr_param) catch |err| switch (err) {
+                        ptr_params.append(allocator, mal_ptr_param) catch |err| switch (err) {
                             error.OutOfMemory => return MalTypeError.Unhandled,
                         };
                     }
