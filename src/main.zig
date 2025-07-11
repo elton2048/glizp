@@ -336,7 +336,6 @@ pub const Shell = struct {
 
     // read from stdin and store the result via provided allocator.
     fn read(self: *Shell, allocator: std.mem.Allocator) ![]const u8 {
-        _ = allocator;
         // NOTE: The reading from stdin is now having two writer for different
         // ends. One is for stdout to display; Another is Arraylist to store
         // the string. Is this a good way to handle?
@@ -384,9 +383,9 @@ pub const Shell = struct {
                         }
                         // New entry point
                         if (inputEvent.ctrl and key == .J) {
-                            var copied_statement = try plugin_full_statement.clone();
-                            defer copied_statement.deinit();
-                            statement = try copied_statement.toOwnedSlice();
+                            var copied_statement = try plugin_full_statement.clone(allocator);
+                            defer copied_statement.deinit(allocator);
+                            statement = try copied_statement.toOwnedSlice(allocator);
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
