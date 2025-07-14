@@ -24,6 +24,8 @@ pub const Message = struct {
 
 /// Pointer to the actual instance.
 context: *const anyopaque,
+/// Underlying allocator to control any lisp required memory allocation.
+allocator: std.mem.Allocator,
 /// Virtual table to store the function pointers on actual implementations.
 vtable: *const VTable,
 /// Name of the plugin.
@@ -51,7 +53,7 @@ pub fn subscribeEvent(self: Self) !void {
 
 const Self = @This();
 
-pub fn init(obj: anytype, envData: *std.StringHashMap(*MalType), messages: *MessageQueue) Self {
+pub fn init(obj: anytype, allocator: std.mem.Allocator, envData: *std.StringHashMap(*MalType), messages: *MessageQueue) Self {
     const TypePtr = @TypeOf(obj);
     const Type = @TypeOf(obj.*);
 
@@ -93,6 +95,7 @@ pub fn init(obj: anytype, envData: *std.StringHashMap(*MalType), messages: *Mess
     return .{
         .fnTable = obj._fnTable,
         .context = obj,
+        .allocator = allocator,
         .name = name,
         .vtable = &.{
             .subscribe = impl.subscribe,

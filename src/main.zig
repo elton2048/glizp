@@ -216,8 +216,8 @@ pub const Shell = struct {
         // const plugin_example = PluginExample.init(allocator);
         // env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
-        // const plugin_history = PluginHistory.init(allocator);
-        // env.*.registerPlugin(plugin_history) catch @panic("OOM");
+        const plugin_history = PluginHistory.init(allocator);
+        env.*.registerPlugin(plugin_history) catch @panic("OOM");
 
         const plugin_editing = PluginEditing.init(allocator, frontend);
         env.*.registerPlugin(plugin_editing) catch @panic("OOM");
@@ -406,7 +406,7 @@ pub const Shell = struct {
                             }
 
                             if (history_plugin) |plugin| {
-                                try plugin.history.append(statement);
+                                try plugin.history.append(self.env.allocator, statement);
                                 // Reset history
                                 plugin.history_curr = plugin.history.items.len - 1;
                             }

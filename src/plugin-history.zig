@@ -4,6 +4,7 @@
 const std = @import("std");
 const lisp = @import("types/lisp.zig");
 
+const ArrayList = std.ArrayListUnmanaged;
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
@@ -14,28 +15,33 @@ const EVAL_TABLE = std.StaticStringMap(LispFunctionWithOpaque).initComptime(.{
     // .{ "set-plugin-value", &set },
 });
 
-fn historyLen(params: []MalType, env: *anyopaque) MalTypeError!MalType {
+fn historyLen(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     _ = params;
 
     const pluginEnv: *PluginHistory = @ptrCast(@alignCast(env));
 
     const value: lisp.NumberType = @floatFromInt(pluginEnv.history.items.len);
-    return MalType{ .number = .{ .value = value } };
+    // TODO: This shouldn't work as it should allocate the memory
+    // properly.
+
+    return MalType.new_number(pluginEnv.allocator, value);
 }
 
 pub const PluginHistory = struct {
     _fnTable: std.StaticStringMap(LispFunctionWithOpaque),
 
-    history: std.ArrayList([]u8),
+    allocator: std.mem.Allocator,
+    history: ArrayList([]u8),
     history_curr: usize,
 
     pub fn init(allocator: std.mem.Allocator) *PluginHistory {
         const self = allocator.create(PluginHistory) catch @panic("OOM");
 
-        const historyArrayList = std.ArrayList([]u8).init(allocator);
+        const historyArrayList: ArrayList([]u8) = .empty;
 
         self.* = .{
             ._fnTable = EVAL_TABLE,
+            .allocator = allocator,
             .history = historyArrayList,
             .history_curr = 0,
         };

@@ -406,7 +406,7 @@ pub const LispEnv = struct {
     /// TODO - Way to check if the plugin fulfills some requirement?
     pub fn registerPlugin(self: *Self, extension: anytype) !void {
         // TODO: Any way to check the extension fulfilling the requirement?
-        const plugin = Plugin.init(extension, &self.data, self.messageQueue);
+        const plugin = Plugin.init(extension, self.allocator, &self.data, self.messageQueue);
 
         logz.info()
             .fmt("[LISP_ENV]", "Plugin name: '{s}' registered.", .{plugin.name})
@@ -803,9 +803,15 @@ pub const LispEnv = struct {
                                         params_items,
                                         plugin,
                                     });
+                                    // Put the item into data collector for garbage collection
+                                    // TODO: Is there anyway to check in test case?
+                                    self.dataCollector.put(fnValue) catch |err| switch (err) {
+                                        else => return MalTypeError.Unhandled,
+                                    };
                                 },
                             }
 
+                            // NOTE: The flow is not used now.
                             if (!lambda_func_run_checker) {
                                 // NOTE: lambda function is not yet handled.
                                 // Put the item into data collector for garbage collection
