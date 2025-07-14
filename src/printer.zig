@@ -8,7 +8,9 @@ const ArrayList = std.ArrayListUnmanaged;
 const debug = std.debug;
 const mem = std.mem;
 
-const MalType = @import("types/lisp.zig").MalType;
+const lisp = @import("types/lisp.zig");
+const MalType = lisp.MalType;
+const List = lisp.List;
 
 const semantic = @import("semantic.zig");
 
@@ -134,33 +136,33 @@ test "printer" {
 
     // Test for boolean case
     {
-        const bool_true = MalType{ .boolean = true };
+        var bool_true = MalType{ .boolean = true };
 
-        const bool_true_result = pr_str(bool_true, true);
+        const bool_true_result = pr_str(&bool_true, true);
         try testing.expectEqualStrings("t", bool_true_result);
 
-        const bool_false = MalType{ .boolean = false };
+        var bool_false = MalType{ .boolean = false };
 
-        const bool_false_result = pr_str(bool_false, true);
+        const bool_false_result = pr_str(&bool_false, true);
         try testing.expectEqualStrings("nil", bool_false_result);
     }
 
     // Test for string case
     {
-        const str1_al = initStringArrayList(allocator, "test");
-        defer str1_al.deinit();
+        var str1_al = initStringArrayList(allocator, "test");
+        defer str1_al.deinit(allocator);
 
-        const str1 = MalType.new_string(str1_al);
+        const str1 = MalType.new_string_ptr(allocator, str1_al);
 
         const str1_readably_result = pr_str(str1, true);
         try testing.expectEqualStrings("\"test\"", str1_readably_result);
         const str1_non_readably_result = pr_str(str1, false);
         try testing.expectEqualStrings("test", str1_non_readably_result);
 
-        const str2_al = initStringArrayList(allocator, "te\"st");
-        defer str2_al.deinit();
+        var str2_al = initStringArrayList(allocator, "te\"st");
+        defer str2_al.deinit(allocator);
 
-        const str2 = MalType.new_string(str2_al);
+        const str2 = MalType.new_string_ptr(allocator, str2_al);
 
         // stored value: "te"st"
         // readably result: "te\"st" (escaped doublequote inside)
@@ -170,46 +172,46 @@ test "printer" {
         const str2_non_readably_result = pr_str(str2, false);
         try testing.expectEqualStrings("te\"st", str2_non_readably_result);
 
-        const str3_al = initStringArrayList(allocator, "\\");
-        defer str3_al.deinit();
+        var str3_al = initStringArrayList(allocator, "\\");
+        defer str3_al.deinit(allocator);
 
-        const str3 = MalType.new_string(str3_al);
+        const str3 = MalType.new_string_ptr(allocator, str3_al);
 
         // stored value: "\"
         // readably result: "\\" (escaped backslash inside)
         const str3_readably_result = pr_str(str3, true);
         try testing.expectEqualStrings("\"\\\\\"", str3_readably_result);
-        // const str3_non_readably_result = pr_str(str3, false);
-        // try testing.expectEqualStrings("\"\\\"", str3_non_readably_result);
+        const str3_non_readably_result = pr_str(str3, false);
+        try testing.expectEqualStrings("\"\\\"", str3_non_readably_result);
 
-        const str4_al = initStringArrayList(allocator, "te\\\"st");
-        defer str4_al.deinit();
+        var str4_al = initStringArrayList(allocator, "te\\\"st");
+        defer str4_al.deinit(allocator);
 
-        const str4 = MalType.new_string(str4_al);
+        const str4 = MalType.new_string_ptr(allocator, str4_al);
 
         // stored value: "te\"st"
         // readably result: "te\\\"st" (escaped backslash and doublequote inside)
         const str4_readably_result = pr_str(str4, true);
         try testing.expectEqualStrings("\"te\\\\\"st\"", str4_readably_result);
-        // const str4_non_readably_result = pr_str(str4, false);
-        // try testing.expectEqualStrings("\"te\\\"st\"", str4_non_readably_result);
+        const str4_non_readably_result = pr_str(str4, false);
+        try testing.expectEqualStrings("\"te\\\"st\"", str4_non_readably_result);
     }
 
     // Test for list case
     {
-        const str1_al = initStringArrayList(allocator, "1");
-        defer str1_al.deinit();
+        var str1_al = initStringArrayList(allocator, "1");
+        defer str1_al.deinit(allocator);
 
-        const str2_al = initStringArrayList(allocator, "2");
-        defer str2_al.deinit();
+        var str2_al = initStringArrayList(allocator, "2");
+        defer str2_al.deinit(allocator);
 
-        var list1_al = ArrayList(MalType).init(allocator);
-        defer list1_al.deinit();
+        var list1_al: List = .empty;
+        defer list1_al.deinit(allocator);
 
-        list1_al.append(MalType.new_string(str1_al)) catch unreachable;
-        list1_al.append(MalType.new_string(str2_al)) catch unreachable;
+        list1_al.append(allocator, MalType.new_string_ptr(allocator, str1_al)) catch unreachable;
+        list1_al.append(allocator, MalType.new_string_ptr(allocator, str2_al)) catch unreachable;
 
-        const list1 = MalType.new_list(allocator, list1_al);
+        const list1 = MalType.new_list_ptr(allocator, list1_al);
         const list1_result = pr_str(list1, true);
 
         try testing.expectEqualStrings("(\"1\" \"2\")", list1_result);
