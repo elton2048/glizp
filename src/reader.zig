@@ -422,7 +422,7 @@ pub const Reader = struct {
         if (isNumber) {
             mal = MalType{
                 .number = .{
-                    // .allocator = self.allocator,
+                    .allocator = self.allocator,
                     .value = std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."),
                 },
             };

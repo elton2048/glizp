@@ -395,6 +395,8 @@ pub const LispEnv = struct {
     }
 
     pub fn deinit(self: *Self) void {
+        std.debug.print("[deinit for env]\n", .{});
+
         // Deinit the env. Note that it is likely means it is for root
         // case.
         // For lambda function, it returns the Lisp object with function
@@ -433,8 +435,8 @@ pub const LispEnv = struct {
             if (std.mem.startsWith(u8, item.key_ptr.*, dataCollectorKeyPrefix)) {
                 self.allocator.free(item.key_ptr.*);
             }
-            utils.log_pointer(item.value_ptr.*);
-            std.debug.print("[DATA COLLECTOR] {any} \n", .{item.value_ptr.*});
+            std.debug.print("[DATA COLLECTOR] {*}; {any} \n", .{ item.value_ptr.*, item.value_ptr.* });
+            // std.debug.print("[DATA COLLECTOR] {*} \n", .{item.value_ptr.*});
             // utils.log("DATA COLLECTOR", item.value_ptr.*);
             item.value_ptr.*.decref();
         }
@@ -565,6 +567,35 @@ pub const LispEnv = struct {
                             .level(.Debug)
                             .log();
 
+                        for (ptr_params.items) |item| {
+                            std.debug.print("[deinit for ptr_params] {*}; {any}\n", .{ item, item });
+
+                            switch (item.*) {
+                                .list => |_list| {
+                                    // _ = _list;
+                                    // NOTE: For list, put the items in env
+                                    // data collector and destroy the ArrayList
+                                    // This could solve list in list but not a general one
+                                    // Related to test cases now
+                                    const truthy_test_case = true;
+
+                                    if (truthy_test_case) {
+                                        for (_list.data.items) |_item| {
+                                            self.dataCollector.put(_item) catch unreachable;
+                                        }
+                                        _list.data.deinit();
+                                    }
+                                    _list.allocator.destroy(item);
+                                    // item.deinit();
+                                },
+                                .vector => {},
+                                else => {
+                                    // self.dataCollector.put(item.copy(self.allocator)) catch unreachable;
+                                    // self.dataCollector.put(item) catch unreachable;
+                                },
+                            }
+                        }
+
                         ptr_params.deinit();
                     }
 
@@ -637,10 +668,11 @@ pub const LispEnv = struct {
                                     // Assume the return type fits with the function
 
                                     mal_ptr_param = try self.apply(mal_item, false);
+                                    mal_ptr_param.incref();
 
-                                    self.dataCollector.put(mal_ptr_param) catch |err| switch (err) {
-                                        else => return MalTypeError.Unhandled,
-                                    };
+                                    // self.dataCollector.put(mal_ptr_param) catch |err| switch (err) {
+                                    //     else => return MalTypeError.Unhandled,
+                                    // };
                                     if (mal_ptr_param.* == .Incompleted) {
                                         return MalTypeError.IllegalType;
                                     }
@@ -655,6 +687,7 @@ pub const LispEnv = struct {
                                     // TODO: Need more assertion
                                     // Assume the return type fits with the function
                                     mal_ptr_param = try self.apply(mal_item, false);
+                                    mal_ptr_param.incref();
                                     // TODO: Making (letx) case deinit
                                     // See lisp deinit number case for related case
                                     // defer mal_ptr_param.deinit();
@@ -695,12 +728,13 @@ pub const LispEnv = struct {
                             // NOTE: Entry point to store MalType created within
                             // apply function
                             var fnValue: *MalType = undefined;
+                            const params_items = ptr_params.items;
                             switch (func) {
                                 .simple => |simple_func| {
                                     // TODO: Skip this now
                                     // _ = simple_func;
                                     const value: MalType = try @call(.auto, simple_func, .{
-                                        ptr_params.items,
+                                        params_items,
                                     });
 
                                     const numberValue = value.as_number() catch unreachable;
@@ -723,7 +757,7 @@ pub const LispEnv = struct {
                                 },
                                 .with_ptr => |ptr_func| {
                                     fnValue = try @call(.auto, ptr_func, .{
-                                        ptr_params.items,
+                                        params_items,
                                         self,
                                     });
                                 },
@@ -765,7 +799,7 @@ pub const LispEnv = struct {
                                     const plugin = @constCast(self.plugins.get(reference).?.context);
 
                                     fnValue = try @call(.auto, plugin_func, .{
-                                        ptr_params.items,
+                                        params_items,
                                         plugin,
                                     });
                                 },
@@ -773,9 +807,9 @@ pub const LispEnv = struct {
 
                             if (!lambda_func_run_checker) {
                                 // Put the item into data collector for garbage collection
-                                self.dataCollector.put(fnValue) catch |err| switch (err) {
-                                    else => return MalTypeError.Unhandled,
-                                };
+                                // self.dataCollector.put(fnValue) catch |err| switch (err) {
+                                //     else => return MalTypeError.Unhandled,
+                                // };
                             }
 
                             logz.info()

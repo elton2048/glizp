@@ -84,7 +84,7 @@ pub const StringData = struct {
 /// As symbol is using slice instead of ArrayList in the current implementation,
 /// they are separated into two types.
 pub const SymbolData = struct {
-    allocator: std.mem.Allocator,
+    allocator: ?std.mem.Allocator = null,
     // data: ArrayList(u8),
     data: []const u8,
     reference_count: ReferenceCountType = 1,
@@ -165,6 +165,7 @@ pub const MalType = union(enum) {
                     }
                 },
                 .string => |string| {
+                    try std.fmt.format(writer, "count: {d}; ", .{string.reference_count});
                     try std.fmt.format(writer, ".string: '{s}'", .{string.data.items});
                 },
                 .list => |list| {
@@ -228,7 +229,7 @@ pub const MalType = union(enum) {
         } };
     }
 
-    // pub fn new_symbol(allocator: std.mem.Allocator, data: []const u8) *MalType {
+    // pub fn new_symbol(allocator: ?std.mem.Allocator, data: []const u8) *MalType {
     //     const mal_ptr = allocator.create(MalType) catch @panic("OOM");
     //     mal_ptr.* = .{ .symbol = .{
     //         .allocator = allocator,
@@ -277,8 +278,7 @@ pub const MalType = union(enum) {
 
     // TODO: Consider add checking for reference count
     pub fn deinit(self: *MalType) void {
-        std.debug.print("[DEINIT entry] {any}\n", .{self});
-        // std.debug.print("[DEINIT pointer] {*}\n", .{self});
+        std.debug.print("[DEINIT entry] {*}; {any}\n", .{ self, self });
 
         switch (self.*) {
             // .symbol => |symbol| {
@@ -287,8 +287,8 @@ pub const MalType = union(enum) {
             // TODO: (let*) error if enabling this
             // trace trap issue
             .number => |number| {
+                std.debug.print("[NUMBER] {any}\n", .{number.allocator});
                 if (number.allocator) |allocator| {
-                    std.debug.print("[NUMBER] {any}\n", .{allocator});
                     allocator.destroy(self);
                 }
             },
@@ -306,7 +306,11 @@ pub const MalType = union(enum) {
                         },
                         else => {
                             item.deinit();
-                            list.allocator.destroy(item);
+
+                            // NOTE: It requires using list allocator
+                            // to destroy as symbol does not have
+                            // individual allocator, results in leakage.
+                            // list.allocator.destroy(item);
                         },
                     }
                 }
@@ -360,6 +364,14 @@ pub const MalType = union(enum) {
                 const new_data = new_data_unmanaged.toManaged(allocator);
 
                 new_object = MalType.new_string_ptr(allocator, new_data);
+            },
+            .number => |number| {
+                new_object = allocator.create(MalType) catch @panic("OOM");
+                new_object.* = .{ .number = .{
+                    .allocator = allocator,
+                    .value = number.value,
+                    .reference_count = number.reference_count,
+                } };
             },
             else => {
                 new_object = allocator.create(MalType) catch @panic("OOM");
@@ -483,7 +495,7 @@ pub const MalType = union(enum) {
     }
 
     pub fn decref(self: *MalType) void {
-        std.debug.print("[DECREF] {any}\n", .{self.*});
+        // std.debug.print("[DECREF] {*}; {any}\n", .{ self, self.* });
         switch (self.*) {
             // .symbol => |*l| {
             //     if (l.reference_count == 0) {

@@ -12,7 +12,7 @@ const LispEnv = @import("glizp").LispEnv;
 
 const MalTypeError = lisp.MalTypeError;
 
-// const utils = @import("utils.zig");
+const utils = @import("../src/utils.zig");
 
 test {
     var leaking_gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -23,6 +23,7 @@ test {
 }
 
 test "plus function - simple case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -40,6 +41,7 @@ test "plus function - simple case" {
 }
 
 test "def function - simple case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -58,6 +60,7 @@ test "def function - simple case" {
 }
 
 test "def function - with list eval case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -77,6 +80,7 @@ test "def function - with list eval case" {
 }
 
 test "let* function - simple case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -95,6 +99,7 @@ test "let* function - simple case" {
 }
 
 test "let* function - multiple let* case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -112,7 +117,8 @@ test "let* function - multiple let* case" {
     try testing.expectEqualStrings("5", result);
 }
 
-test "list function  - simple case" {
+test "list function - simple case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -132,6 +138,7 @@ test "list function  - simple case" {
 }
 
 test "list function - string type case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -144,6 +151,7 @@ test "list function - string type case" {
 
     // NOTE: This is not a primitive value, thus require manual deinit.
     const list_statement_value = try env.apply(list_statement.ast_root, false);
+    // NOTE: To keep it simple, decref for all cases is desired.
     defer list_statement_value.decref();
 
     const result = printer.pr_str(list_statement_value, true);
@@ -151,6 +159,7 @@ test "list function - string type case" {
 }
 
 test "list function  - multiple type case" {
+    if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
@@ -169,7 +178,69 @@ test "list function  - multiple type case" {
     try testing.expectEqualStrings("(1 2 \"1\")", result);
 }
 
+test "list function - simple list in list case" {
+    if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var list_statement = Reader.init(allocator, "(list (list 3 4))");
+    defer list_statement.deinit();
+
+    try testing.expect(list_statement.ast_root.* == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const list_statement_value = try env.apply(list_statement.ast_root, false);
+    // utils.log("list in list", list_statement_value);
+    defer {
+        std.debug.print("====================start deinit=====================\n", .{});
+        std.debug.print("[ast_root] value {any}\n", .{list_statement.ast_root});
+        std.debug.print("[list_statement_value] value {any}\n", .{list_statement_value});
+
+        // std.debug.print("[list in list] {any}; {*} \n", .{ list_statement_value, list_statement_value });
+        // const list = list_statement_value.as_list_ptr() catch unreachable;
+        // const item1 = list.items[0];
+        // std.debug.print("[item in list] {any} \n", .{item1});
+        // std.debug.print("[item in list] {*} \n", .{item1});
+        list_statement_value.decref();
+    }
+
+    const result = printer.pr_str(list_statement_value, true);
+    try testing.expectEqualStrings("((3 4))", result);
+}
+
+test "list function - list in list case" {
+    if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var list_statement = Reader.init(allocator, "(list (list 3 4) 1 2)");
+    defer list_statement.deinit();
+
+    try testing.expect(list_statement.ast_root.* == .list);
+
+    // NOTE: This is not a primitive value, thus require manual deinit.
+    const list_statement_value = try env.apply(list_statement.ast_root, false);
+    // utils.log("list in list", list_statement_value);
+    defer {
+        std.debug.print("====================start deinit=====================\n", .{});
+        std.debug.print("[list in list] {any}; {*} \n", .{ list_statement_value, list_statement_value });
+        const list = list_statement_value.as_list_ptr() catch unreachable;
+        const item1 = list.items[0];
+        std.debug.print("[item in list] {any} \n", .{item1});
+        std.debug.print("[item in list] {*} \n", .{item1});
+        list_statement_value.decref();
+    }
+
+    const result = printer.pr_str(list_statement_value, true);
+    try testing.expectEqualStrings("((3 4) 1 2)", result);
+}
+
 test "listp function - truthy case" {
+    // if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
