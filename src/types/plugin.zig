@@ -74,7 +74,7 @@ pub fn init(obj: anytype, envData: *std.StringHashMap(MalType), messages: *Messa
             if (@hasDecl(@TypeOf(self.*), method_name)) {
                 self.subscribe(inner_env) catch @panic("PLUGIn");
             } else {
-                utils.log("PLUGIN", std.fmt.comptimePrint("method \"{s}\" not implemented yet", .{method_name}));
+                utils.log("PLUGIN", "method \"{s}\" not implemented yet ", .{method_name}, .{});
             }
         }
 
@@ -85,7 +85,7 @@ pub fn init(obj: anytype, envData: *std.StringHashMap(MalType), messages: *Messa
             if (@hasDecl(@TypeOf(self.*), method_name)) {
                 self.subscribeEvent(messageQueue) catch @panic("PLUGIn");
             } else {
-                utils.log("PLUGIN", std.fmt.comptimePrint("method \"{s}\" not implemented yet", .{method_name}));
+                utils.log("PLUGIN", "method \"{s}\" not implemented yet ", .{method_name}, .{});
             }
         }
     };

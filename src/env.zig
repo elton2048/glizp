@@ -593,11 +593,11 @@ pub const LispEnv = struct {
                                 plugin.subscribeEvent() catch @panic("plugin subscribeEvent");
                             }
 
-                            utils.log("CB", item);
+                            utils.log("CB", "{any}", .{item}, .{});
                         }
                     }
 
-                    utils.log("WAIT", inner_userdata.data);
+                    utils.log("WAIT", "{any}", .{inner_userdata.data}, .{});
                 }
 
                 _ = inner_loop;
@@ -924,7 +924,7 @@ pub const LispEnv = struct {
                                     } else |_| {}
                                 },
                                 else => {
-                                    utils.log("ERROR", "Illegal type to be evaled");
+                                    utils.log("ERROR", "Illegal type to be evaled", .{}, .{ .color = .Red });
                                     return MalTypeError.IllegalType;
                                 },
                             }

@@ -29,7 +29,7 @@ fn get(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const value: NumberType = @floatFromInt(pluginEnv.num);
     const result = MalType{ .number = .{ .value = value } };
 
-    utils.log("get-plugin-value", pluginEnv.num);
+    utils.log("get-plugin-value", "{any}", .{pluginEnv.num}, .{});
 
     return result;
 }
@@ -44,7 +44,7 @@ fn add(params: []MalType, env: *anyopaque) MalTypeError!MalType {
     const value: NumberType = @floatFromInt(pluginEnv.num);
     const result = MalType{ .number = .{ .value = value } };
 
-    utils.log("set-plugin-value", pluginEnv.num);
+    utils.log("set-plugin-value", "{any}", .{pluginEnv.num}, .{});
 
     return result;
 }
@@ -80,9 +80,9 @@ pub const PluginExample = struct {
     pub fn subscribeEvent(self: *PluginExample, messages: *MessageQueue) !void {
         // TODO: The subscription shall filter out correct message.
         if (messages.getLastOrNull()) |item| {
-            utils.log("TEST", item);
+            utils.log("TEST", "{any}", .{item}, .{});
 
-            utils.log("TEST", self.num);
+            utils.log("TEST", "{any}", .{self.num}, .{});
         }
     }
 };

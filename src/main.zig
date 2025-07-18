@@ -270,14 +270,14 @@ pub const Shell = struct {
 
         // TODO: Handle deinit the result
         const result = self.env.apply(statement_reader.ast_root, false) catch |err| {
-            utils.log("ERR", err);
+            utils.log("ERR", "{any}", .{err}, .{});
             return;
         };
         // defer result.deinit();
 
         if (print) {
             const str = printer.pr_str(result, true);
-            utils.log("EVAL", str);
+            utils.log("EVAL", "{any}", .{str}, .{});
         }
 
         return;
@@ -288,7 +288,7 @@ pub const Shell = struct {
 
         // TODO: Handle deinit the result
         const result = self.env.apply(statement_reader.ast_root, false) catch |err| {
-            utils.log("ERRR", err);
+            utils.log("ERRR", "{any}", .{err}, .{});
             return "";
         };
         // defer result.deinit();
@@ -302,7 +302,7 @@ pub const Shell = struct {
         const load_statement_reader = parsing_statement(load_statement);
 
         const result = self.env.apply(load_statement_reader.ast_root, false) catch |err| {
-            utils.log("ERR", err);
+            utils.log("ERR", "{any}", .{err}, .{});
             return;
         };
         defer result.deinit();
