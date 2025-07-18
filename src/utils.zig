@@ -3,6 +3,30 @@ const maxInt = std.math.maxInt;
 const print = std.debug.print;
 const assert = std.debug.assert;
 
+/// ANSI 3-bit Color code for terminal
+/// The code actually supports more formatting, for simplicity they
+/// are not included now.
+const AnsiColor = enum(u8) {
+    /// Can be considered as terminal default.
+    Reset = 0,
+    Black = 30,
+    Red = 31,
+    Green = 32,
+    Yellow = 33,
+    Blue = 34,
+    Magenta = 35,
+    Cyan = 36,
+    White = 37,
+    BrightBlack = 90,
+    BrightRed = 91,
+    BrightGreen = 92,
+    BrightYellow = 93,
+    BrightBlue = 94,
+    BrightMagenta = 95,
+    BrightCyan = 96,
+    BrightWhite = 97,
+};
+
 pub inline fn valuesFromEnum(comptime E: type, comptime enums: type) []const E {
     comptime {
         // assert(@typeInfo(enums) == .Enum);
@@ -16,63 +40,25 @@ pub inline fn valuesFromEnum(comptime E: type, comptime enums: type) []const E {
     }
 }
 
-pub fn log(comptime key: []const u8, message: anytype) void {
-    // var buffer: [100]u8 = undefined;
-    // var buffer1: [100]u8 = undefined;
-    // const output_format = "{any}";
-    // const output = std.fmt.bufPrint(&buffer, "test {s}", .{output_format}) catch unreachable;
-    // const final_output = std.fmt.bufPrint(&buffer1, output, .{"aa"}) catch unreachable;
-    // std.debug.print("{s}\n", .{final_output});
-    // std.debug.print(output, .{"aa"});
+/// Further option for util logging function
+pub const LogOption = struct {
+    /// Color for the log in terminal env.
+    color: AnsiColor = .Reset,
+    /// Whether the log is shown in test cases only.
+    test_only: bool = false,
+};
 
-    // TODO: Handle the print case better
-    // The current way is due to the formatted string has to be known
-    // in comptime, which is difficult as it involves internal memory
-    // to handle string concatenation, e.g. replace "any" into "s" to
-    // handle string in formatting instead of treating them as an array
-    // of u8. Consider the print result of string "test":
-    // In {s} case: "test"
-    // In {any} case: { 116, 101, 115, 116 } <- which are ASCII codes
-    const T = @typeInfo(@TypeOf(message));
-    // std.debug.print("{any}\n", .{T});
-    switch (T) {
-        .int => {
-            // std.debug.print("int\n", .{});
-        },
-        .float => {
-            // std.debug.print("float\n", .{});
-        },
-        .array => {
-            // std.debug.print("array\n", .{});
-        },
-        .pointer => {
-            // std.debug.print("pointer\n", .{});
-            // T.pointer.is_const == true;
-            const TT = @typeInfo(T.pointer.child);
-            switch (TT) {
-                .array => {
-                    if (TT.array.child == u8) {
-                        // std.debug.print("Pointer of array type\n", .{});
-                        std.debug.print("[{s}]: {s}\n", .{ key, message });
-                        return;
-                    }
-                },
-                .int => {
-                    std.debug.print("[{s}]: {d}\n", .{ key, message });
-                    return;
-                },
-                else => {
-                    // Uncomment the following to debug further.
-                    // std.debug.print("{any}\n", .{TT});
-                    @panic("Not implemented to handle Pointer of non-array types.");
-                },
-            }
-        },
-        else => {
-            // std.debug.print("Pending to handle\n", .{});
-        },
+/// Log function with color setting
+pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype, option: LogOption) void {
+    if (option.color != .Reset) {
+        std.debug.print("\x1b[{d}m", .{@intFromEnum(option.color)});
     }
-    std.debug.print("[{s}]: {any}\n", .{ key, message });
+    if (!std.mem.eql(u8, key, "")) {
+        std.debug.print("[{s}]: ", .{key});
+    }
+    std.debug.print(message, args);
+    std.debug.print("\n", .{});
+    std.debug.print("\x1b[0m", .{});
 }
 
 pub fn log_pointer(ptr: anytype) void {
