@@ -71,11 +71,14 @@ pub const Reader = struct {
     }
 
     pub fn deinit(self: *Reader) void {
+        // TESTING:
+
         self.tokens.deinit();
         // utils.log("reader deinit", self.ast_root.*);
         // utils.log_pointer(self.ast_root);
 
-        self.ast_root.deinit();
+        utils.log("reader deinit ast_root before", "{any}", .{self.ast_root}, .{ .color = .BrightRed });
+        self.ast_root.decref();
         // NOTE: This should be required but now double free happens.
         // self.allocator.destroy(self.ast_root);
         self.allocator.destroy(self);
@@ -308,9 +311,9 @@ pub const Reader = struct {
         var end = false;
         // NOTE: This is likely causing issue, but handle later as
         // vector is not in priority
-        const vectorLisp = MalType{ .symbol = "vector" };
-        // const vectorLisp = MalType.new_symbol(self.allocator, "vector");
-        try list.append(@constCast(&vectorLisp));
+        // const vectorLisp = MalType{ .symbol = "vector" };
+        const vectorLisp = MalType.new_symbol(self.allocator, "vector");
+        try list.append(@constCast(vectorLisp));
         while (self.next()) |_| {
             const malType = self.read_form();
 
@@ -437,7 +440,10 @@ pub const Reader = struct {
                 .log();
         } else {
             mal = MalType{
-                .symbol = token,
+                .symbol = .{
+                    .allocator = self.allocator,
+                    .data = token,
+                },
             };
         }
 

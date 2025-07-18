@@ -179,31 +179,35 @@ test "list function  - multiple type case" {
 }
 
 test "list function - simple list in list case" {
-    if (true) return error.SkipZigTest;
+    // if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
 
     const env = LispEnv.init_root(allocator);
     defer env.deinit();
 
     var list_statement = Reader.init(allocator, "(list (list 3 4))");
-    defer list_statement.deinit();
+    // defer list_statement.deinit();
 
     try testing.expect(list_statement.ast_root.* == .list);
 
     // NOTE: This is not a primitive value, thus require manual deinit.
     const list_statement_value = try env.apply(list_statement.ast_root, false);
-    // utils.log("list in list", list_statement_value);
     defer {
-        std.debug.print("====================start deinit=====================\n", .{});
-        std.debug.print("[ast_root] value {any}\n", .{list_statement.ast_root});
-        std.debug.print("[list_statement_value] value {any}\n", .{list_statement_value});
+        utils.log("", "====================start deinit=====================", .{}, .{});
+        utils.log("ast_root", "value {any}", .{list_statement.ast_root}, .{});
+        utils.log("list_statement_value", "value {any}", .{list_statement_value}, .{});
+        // std.debug.print("[ast_root] value {any}\n", .{list_statement.ast_root});
+        // std.debug.print("[list_statement_value] value {any}\n", .{list_statement_value});
 
         // std.debug.print("[list in list] {any}; {*} \n", .{ list_statement_value, list_statement_value });
         // const list = list_statement_value.as_list_ptr() catch unreachable;
         // const item1 = list.items[0];
         // std.debug.print("[item in list] {any} \n", .{item1});
         // std.debug.print("[item in list] {*} \n", .{item1});
+
+        // NOTE: order is important(?)
         list_statement_value.decref();
+        list_statement.deinit();
     }
 
     const result = printer.pr_str(list_statement_value, true);
@@ -224,14 +228,9 @@ test "list function - list in list case" {
 
     // NOTE: This is not a primitive value, thus require manual deinit.
     const list_statement_value = try env.apply(list_statement.ast_root, false);
-    // utils.log("list in list", list_statement_value);
     defer {
         std.debug.print("====================start deinit=====================\n", .{});
         std.debug.print("[list in list] {any}; {*} \n", .{ list_statement_value, list_statement_value });
-        const list = list_statement_value.as_list_ptr() catch unreachable;
-        const item1 = list.items[0];
-        std.debug.print("[item in list] {any} \n", .{item1});
-        std.debug.print("[item in list] {*} \n", .{item1});
         list_statement_value.decref();
     }
 

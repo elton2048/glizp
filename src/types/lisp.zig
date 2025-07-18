@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const hash_map = std.hash_map;
 const Allocator = std.mem.Allocator;
 
@@ -119,8 +120,8 @@ pub const MalType = union(enum) {
     vector: VectorData,
     /// General symbol type including function keyword
     // TODO: Test for replaceing with allocator
-    symbol: []const u8,
-    // symbol: SymbolData,
+    // symbol: []const u8,
+    symbol: SymbolData,
 
     function: *LispEnv,
 
@@ -139,13 +140,15 @@ pub const MalType = union(enum) {
 
             switch (self) {
                 .symbol => |symbol| {
-                    try std.fmt.format(writer, ".symbol: '{s}'", .{symbol});
+                    try std.fmt.format(writer, ".symbol: '{s}'; count: {d}", .{ symbol.data, symbol.reference_count });
                 },
                 .number => |number| {
+                    try std.fmt.format(writer, "\x1b[35m", .{});
                     try std.fmt.format(writer, ".number: {d}; count: {d}", .{
                         number.value,
                         number.reference_count,
                     });
+                    try std.fmt.format(writer, "\x1b[0m", .{});
                 },
                 .boolean => |boolean| {
                     try std.fmt.format(writer, ".boolean: {any}", .{boolean});
@@ -229,15 +232,26 @@ pub const MalType = union(enum) {
         } };
     }
 
-    // pub fn new_symbol(allocator: ?std.mem.Allocator, data: []const u8) *MalType {
-    //     const mal_ptr = allocator.create(MalType) catch @panic("OOM");
-    //     mal_ptr.* = .{ .symbol = .{
-    //         .allocator = allocator,
-    //         .data = data,
-    //     } };
+    pub fn new_symbol(allocator: std.mem.Allocator, data: []const u8) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+        mal_ptr.* = .{ .symbol = .{
+            .allocator = allocator,
+            .data = data,
+        } };
 
-    //     return mal_ptr;
-    // }
+        return mal_ptr;
+    }
+
+    pub fn new_empty_list_ptr(allocator: std.mem.Allocator) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = MalType{ .list = .{
+            .allocator = allocator,
+            .data = List.init(allocator),
+        } };
+
+        return mal_ptr;
+    }
 
     pub fn new_list_ptr(allocator: std.mem.Allocator, data: List) *MalType {
         const mal_ptr = allocator.create(MalType) catch @panic("OOM");
@@ -278,12 +292,16 @@ pub const MalType = union(enum) {
 
     // TODO: Consider add checking for reference count
     pub fn deinit(self: *MalType) void {
-        std.debug.print("[DEINIT entry] {*}; {any}\n", .{ self, self });
+        if (builtin.is_test) {
+            std.debug.print("[DEINIT entry] {*}; {any}\n", .{ self, self });
+        }
 
         switch (self.*) {
-            // .symbol => |symbol| {
-            //     symbol.allocator.destroy(self);
-            // },
+            .symbol => |symbol| {
+                if (symbol.allocator) |allocator| {
+                    allocator.destroy(self);
+                }
+            },
             // TODO: (let*) error if enabling this
             // trace trap issue
             .number => |number| {
@@ -297,15 +315,15 @@ pub const MalType = union(enum) {
             },
             .list => |list| {
                 for (list.data.items) |item| {
-                    std.debug.print("[DEINIT] {any}\n", .{item});
+                    utils.log("DEINIT LIST", "{any}", .{item}, .{ .color = .BrightYellow });
                     utils.log_pointer(item);
 
                     switch (item.*) {
                         .list => {
-                            item.deinit();
+                            item.decref();
                         },
                         else => {
-                            item.deinit();
+                            item.decref();
 
                             // NOTE: It requires using list allocator
                             // to destroy as symbol does not have
@@ -351,12 +369,12 @@ pub const MalType = union(enum) {
     /// Copy MalType into designated allocator. The underlying data
     /// should also be copied into designated allocator.
     pub fn copy(self: *MalType, allocator: std.mem.Allocator) *MalType {
+        utils.log("lisp", "COPY", .{}, .{});
         // const new_object = allocator.create(MalType) catch @panic("OOM");
 
         var new_object: *MalType = undefined;
         switch (self.*) {
             .string => |string| {
-                utils.log("lisp", "COPY");
                 var original_data = string.data;
                 var original_data_unmanaged = original_data.moveToUnmanaged();
 
@@ -386,7 +404,7 @@ pub const MalType = union(enum) {
     pub fn as_symbol(self: MalType) MalTypeError![]const u8 {
         switch (self) {
             .symbol => |symbol| {
-                return symbol;
+                return symbol.data;
             },
             else => return MalTypeError.IllegalType,
         }
@@ -497,22 +515,23 @@ pub const MalType = union(enum) {
     pub fn decref(self: *MalType) void {
         // std.debug.print("[DECREF] {*}; {any}\n", .{ self, self.* });
         switch (self.*) {
-            // .symbol => |*l| {
-            //     if (l.reference_count == 0) {
-            //         return;
-            //     }
+            .symbol => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
 
-            //     l.reference_count -= 1;
-            //     if (l.reference_count == 0) {
-            //         self.deinit();
-            //     }
-            // },
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
             .number => |*l| {
                 if (l.reference_count == 0) {
                     return;
                 }
 
                 l.reference_count -= 1;
+                utils.log("number", "decref {any}", .{self}, .{ .color = .Yellow });
                 if (l.reference_count == 0) {
                     self.deinit();
                 }
@@ -528,7 +547,7 @@ pub const MalType = union(enum) {
                 }
             },
             .list => |*l| {
-                utils.log("LIST 1", l.reference_count);
+                utils.log("LIST 1", "{any}", .{l.reference_count}, .{});
                 if (l.reference_count == 0) {
                     return;
                 }
@@ -537,8 +556,6 @@ pub const MalType = union(enum) {
                 if (l.reference_count == 0) {
                     self.deinit();
                 }
-                // utils.log("LIST 0", l.reference_count);
-                // std.debug.print("[DECREF 0] {any}\n", .{self.*});
             },
             .vector => |*l| {
                 if (l.reference_count == 0) {
@@ -591,7 +608,7 @@ pub const MalType = union(enum) {
 const MalTypeContext = struct {
     pub fn hash(_: @This(), key: *MalType) u64 {
         return switch (key.*) {
-            .symbol => |s| hash_map.hashString(s),
+            .symbol => |s| hash_map.hashString(s.data),
             .string => |str| hash_map.hashString(str.data.items),
             else => unreachable,
         };
@@ -600,7 +617,7 @@ const MalTypeContext = struct {
     pub fn eql(_: @This(), ma: *MalType, mb: *MalType) bool {
         return switch (ma.*) {
             .symbol => |a| switch (mb.*) {
-                .symbol => |b| hash_map.eqlString(a, b),
+                .symbol => |b| hash_map.eqlString(a.data, b.data),
                 else => false,
             },
             .string => |a| switch (mb.*) {

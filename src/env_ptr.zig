@@ -133,7 +133,10 @@ fn listFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     var list = ArrayList(*MalType).init(env.allocator);
 
     for (params) |param| {
-        const mal_param = param.copy(env.allocator);
+        // const mal_param = param.copy(env.allocator);
+        param.incref();
+        const mal_param = param;
+        utils.log("listFunc", "{*}; {any}", .{ mal_param, mal_param }, .{ .color = .Green });
         list.append(mal_param) catch @panic("test");
     }
 
@@ -220,8 +223,6 @@ fn loadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     // is clear, the corresponding key will be invalidated as well, causing
     // getting key "a" returns no value.
     const file_content = try fsLoadFunc(params, env);
-
-    // utils.log("load", file_content);
 
     env.internalData.append(file_content) catch |err| switch (err) {
         // TODO: Meaningful error for such case
@@ -311,12 +312,13 @@ pub const LispEnv = struct {
             if (optional_func) |func| {
                 const value = generateFunctionWithAttributes(T, func, reference);
 
-                const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                // const lispKey = baseTable.allocator.create(MalType) catch @panic("OOM");
+                const lispKey = MalType.new_symbol(baseTable.allocator, key);
                 defer baseTable.allocator.destroy(lispKey);
 
-                lispKey.* = MalType{
-                    .symbol = key,
-                };
+                // lispKey.* = MalType{
+                //     .symbol = key,
+                // };
 
                 // const lispKey = MalType.new_symbol(baseTable.allocator, key);
                 // defer lispKey.deinit();
@@ -415,9 +417,6 @@ pub const LispEnv = struct {
         while (dataIter.next()) |item| {
             // For lambda variables, they are deinit within the function.
             if (!std.mem.eql(u8, item.key_ptr.*, LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY)) {
-                // utils.log_pointer(item.value_ptr);
-                // utils.log("DATA", item.value_ptr.*);
-
                 item.value_ptr.*.decref();
             }
         }
@@ -437,7 +436,6 @@ pub const LispEnv = struct {
             }
             std.debug.print("[DATA COLLECTOR] {*}; {any} \n", .{ item.value_ptr.*, item.value_ptr.* });
             // std.debug.print("[DATA COLLECTOR] {*} \n", .{item.value_ptr.*});
-            // utils.log("DATA COLLECTOR", item.value_ptr.*);
             item.value_ptr.*.decref();
         }
         self.dataCollector.deinit();
@@ -567,34 +565,69 @@ pub const LispEnv = struct {
                             .level(.Debug)
                             .log();
 
-                        for (ptr_params.items) |item| {
-                            std.debug.print("[deinit for ptr_params] {*}; {any}\n", .{ item, item });
+                        // Pop all the items out and put into data collector
+                        // deinit the array list
 
+                        // ---------------
+                        while (ptr_params.pop()) |item| {
+                            utils.log("ptr_params", "{any}", .{item}, .{ .color = .BrightWhite, .test_only = true });
                             switch (item.*) {
-                                .list => |_list| {
-                                    // _ = _list;
-                                    // NOTE: For list, put the items in env
-                                    // data collector and destroy the ArrayList
-                                    // This could solve list in list but not a general one
-                                    // Related to test cases now
-                                    const truthy_test_case = true;
-
-                                    if (truthy_test_case) {
-                                        for (_list.data.items) |_item| {
-                                            self.dataCollector.put(_item) catch unreachable;
-                                        }
-                                        _list.data.deinit();
-                                    }
-                                    _list.allocator.destroy(item);
-                                    // item.deinit();
+                                .list => {
+                                    self.dataCollector.put(item) catch unreachable;
                                 },
-                                .vector => {},
-                                else => {
-                                    // self.dataCollector.put(item.copy(self.allocator)) catch unreachable;
-                                    // self.dataCollector.put(item) catch unreachable;
-                                },
+                                else => {},
                             }
                         }
+                        // ---------------
+
+                        // Destroy the item in the list only
+
+                        // ---------------
+                        // for (ptr_params.items) |item| {
+                        //     std.debug.print("[deinit for ptr_params] {*}; {any}\n", .{ item, item });
+                        //     switch (item.*) {
+                        //         .list => |*_list| {
+                        //             self.dataCollector.put(item) catch unreachable;
+                        //             _ = _list;
+                        //             // _list.allocator.destroy(item);
+                        //         },
+                        //         else => {},
+                        //     }
+                        // }
+                        // ---------------
+
+                        // for (ptr_params.items) |item| {
+                        //     std.debug.print("[deinit for ptr_params] {*}; {any}\n", .{ item, item });
+
+                        //     switch (item.*) {
+                        //         .list => |*_list| {
+                        //             // _ = _list;
+                        //             // NOTE: For list, put the items in env
+                        //             // data collector and destroy the ArrayList
+                        //             // This could solve list in list but not a general one
+                        //             // Related to test cases now; Not useful
+                        //             // after symbol includes allocator field
+                        //             const truthy_test_case = false;
+
+                        //             if (truthy_test_case) {
+                        //                 while (_list.data.pop()) |_item| {
+                        //                     // _item.incref();
+                        //                     self.dataCollector.put(_item) catch unreachable;
+                        //                 }
+                        //                 // _list.data.deinit();
+                        //             }
+                        //             // item.decref();
+                        //             // self.dataCollector.put(item) catch unreachable;
+                        //             _list.allocator.destroy(item);
+                        //             // item.deinit();
+                        //         },
+                        //         .vector => {},
+                        //         else => {
+                        //             // self.dataCollector.put(item.copy(self.allocator)) catch unreachable;
+                        //             // self.dataCollector.put(item) catch unreachable;
+                        //         },
+                        //     }
+                        // }
 
                         ptr_params.deinit();
                     }
@@ -603,7 +636,7 @@ pub const LispEnv = struct {
                         if (i == 0) {
                             switch (mal_item.*) {
                                 .symbol => |symbol| {
-                                    fnName = symbol;
+                                    fnName = symbol.data;
                                 },
                                 .function => |_lambda| {
                                     _ = _lambda;
@@ -624,7 +657,7 @@ pub const LispEnv = struct {
                                     } else |_| {}
                                 },
                                 else => {
-                                    utils.log("ERROR", "Illegal type to be evaled");
+                                    utils.log("ERROR", "Illegal type to be evaled", .{}, .{ .color = .Red });
                                     return MalTypeError.IllegalType;
                                 },
                             }
@@ -668,7 +701,7 @@ pub const LispEnv = struct {
                                     // Assume the return type fits with the function
 
                                     mal_ptr_param = try self.apply(mal_item, false);
-                                    mal_ptr_param.incref();
+                                    // mal_ptr_param.incref();
 
                                     // self.dataCollector.put(mal_ptr_param) catch |err| switch (err) {
                                     //     else => return MalTypeError.Unhandled,
@@ -687,7 +720,7 @@ pub const LispEnv = struct {
                                     // TODO: Need more assertion
                                     // Assume the return type fits with the function
                                     mal_ptr_param = try self.apply(mal_item, false);
-                                    mal_ptr_param.incref();
+                                    // mal_ptr_param.incref();
                                     // TODO: Making (letx) case deinit
                                     // See lisp deinit number case for related case
                                     // defer mal_ptr_param.deinit();
@@ -715,11 +748,11 @@ pub const LispEnv = struct {
                             .level(.Debug)
                             .log();
 
-                        var key = MalType{ .symbol = fnName };
-                        // var key = MalType.new_symbol(env.allocator, fnName);
-                        // defer key.deinit();
+                        // var key = MalType{ .symbol = fnName };
+                        const key = MalType.new_symbol(env.allocator, fnName);
+                        defer key.deinit();
 
-                        if (env.fnTable.get(&key)) |funcWithAttr| {
+                        if (env.fnTable.get(key)) |funcWithAttr| {
                             logz.info()
                                 .fmt("[env_test]", "{any}", .{ptr_params})
                                 .level(.Debug)
@@ -817,6 +850,8 @@ pub const LispEnv = struct {
                                 .level(.Debug)
                                 .log();
 
+                            // Store the result in env, hence the result should not deinit.
+                            // self.dataCollector.put(fnValue) catch unreachable;
                             return fnValue;
                         } else {
                             return @constCast(&MalType{ .boolean = false });
@@ -850,7 +885,7 @@ pub const LispEnv = struct {
                     return mal;
                 },
                 .symbol => |symbol| {
-                    return self.getVar(symbol);
+                    return self.getVar(symbol.data);
                 },
                 else => return mal,
             }
