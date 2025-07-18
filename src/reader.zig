@@ -58,7 +58,7 @@ pub const Reader = struct {
     allocator: std.mem.Allocator,
     tokens: ArrayList(Token),
     token_curr: usize,
-    ast_root: MalType,
+    ast_root: *MalType,
 
     fn createList(self: Reader) List {
         const list = List.init(self.allocator);
@@ -71,8 +71,16 @@ pub const Reader = struct {
     }
 
     pub fn deinit(self: *Reader) void {
+        // TESTING:
+
         self.tokens.deinit();
-        self.ast_root.deinit();
+        // utils.log("reader deinit", self.ast_root.*);
+        // utils.log_pointer(self.ast_root);
+
+        utils.log("reader deinit ast_root before", "{any}", .{self.ast_root}, .{ .color = .BrightRed });
+        self.ast_root.decref();
+        // NOTE: This should be required but now double free happens.
+        // self.allocator.destroy(self.ast_root);
         self.allocator.destroy(self);
     }
 
@@ -162,17 +170,31 @@ pub const Reader = struct {
         return token;
     }
 
-    pub fn read_form(self: *Reader) MalType {
-        var mal: MalType = undefined;
+    pub fn read_form(self: *Reader) *MalType {
+        var mal_ptr: *MalType = undefined;
+
+        defer {
+            // self.allocator.destroy(mal_ptr);
+            switch (mal_ptr.*) {
+                .list => {},
+                .vector => {},
+                else => {
+                    // self.allocator.destroy(mal_ptr);
+                },
+            }
+        }
 
         // Early return for empty case
         if (self.tokens.items.len == 0) {
-            mal = .Incompleted;
-            return mal;
+            mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
+            mal_ptr.* = .Incompleted;
+
+            return mal_ptr;
         }
 
         const token = self.peek() catch @panic("Accessing invalid token.");
         for (token) |char| {
+            // utils.log("token", char);
             // TODO: Currently check only the first char and handle that
             // This should be changed for a better algo
             // "token" should be with length 1 only for this case.
@@ -184,16 +206,21 @@ pub const Reader = struct {
                             .fmt("[LOG]", "statement missed matched parenthesis", .{})
                             .log();
 
-                        mal = .Incompleted;
+                        // NOTE: May not needed
+                        mal_ptr.* = .Incompleted;
                         break;
                     },
                     else => {
                         @panic("Unexpected error");
                     },
                 };
-                mal = MalType.new_list(list);
+
+                mal_ptr = MalType.new_list_ptr(self.allocator, list);
             } else if (char == SExprEnd) {
-                mal = .SExprEnd;
+                mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
+                mal_ptr.* = .SExprEnd;
+
+                defer self.allocator.destroy(mal_ptr);
             } else if (char == VectorExprStart) {
                 const list = self.read_vector() catch |err| switch (err) {
                     ReaderError.UnmatchedVectorExpr => {
@@ -201,32 +228,36 @@ pub const Reader = struct {
                             .fmt("[LOG]", "statement missed matched parenthesis", .{})
                             .log();
 
-                        mal = .Incompleted;
+                        // NOTE: May not needed
+                        mal_ptr.* = .Incompleted;
                         break;
                     },
                     else => {
                         @panic("Unexpected error");
                     },
                 };
-                mal = MalType.new_list(list);
+                mal_ptr = MalType.new_vector_ptr(self.allocator, list);
             } else if (char == VectorExprEnd) {
-                mal = .VectorExprEnd;
+                mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
+                mal_ptr.* = .VectorExprEnd;
+
+                defer self.allocator.destroy(mal_ptr);
             } else {
-                mal = self.read_atom(token);
+                mal_ptr = self.read_atom(token);
             }
             break;
         }
 
         logz.info()
-            .fmt("[LOG]", "read_form result: {any}", .{mal})
+            .fmt("[LOG]", "read_form result: {any}", .{mal_ptr})
             .log();
 
-        return mal;
+        return mal_ptr;
     }
 
     // As the list is not expected to be expanded, return slice instead
     // of array list.
-    pub fn read_list(self: *Reader) !ArrayList(MalType) {
+    pub fn read_list(self: *Reader) !ArrayList(*MalType) {
         var list = self.createList();
         errdefer {
             list.deinit();
@@ -235,11 +266,13 @@ pub const Reader = struct {
         var end = false;
         while (self.next()) |_| {
             const malType = self.read_form();
-
             // NOTE: append action could mutate the original object as it access
             // the pointer and expand memory.
-            switch (malType) {
+            switch (malType.*) {
                 .SExprEnd => {
+                    // The object finishes its job to indicate end of
+                    // expression, hence destroy here.
+                    // defer self.allocator.destroy(malType);
                     end = true;
                     break;
                 },
@@ -268,22 +301,29 @@ pub const Reader = struct {
     /// Reading vector from string, it appends a "vector" symbol at the
     /// beginning of the list then append all items within bracket to
     /// create vector data structure.
-    pub fn read_vector(self: *Reader) !ArrayList(MalType) {
+    // TODO: Need to handle double free vector case in running main program
+    pub fn read_vector(self: *Reader) !ArrayList(*MalType) {
         var list = self.createList();
         errdefer {
             list.deinit();
         }
 
         var end = false;
-        const vectorLisp = MalType{ .symbol = "vector" };
-        try list.append(vectorLisp);
+        // NOTE: This is likely causing issue, but handle later as
+        // vector is not in priority
+        // const vectorLisp = MalType{ .symbol = "vector" };
+        const vectorLisp = MalType.new_symbol(self.allocator, "vector");
+        try list.append(@constCast(vectorLisp));
         while (self.next()) |_| {
             const malType = self.read_form();
 
             // NOTE: append action could mutate the original object as it access
             // the pointer and expand memory.
-            switch (malType) {
+            switch (malType.*) {
                 .VectorExprEnd => {
+                    // The object finishes its job to indicate end of
+                    // expression, hence destroy here.
+                    // defer self.allocator.destroy(malType);
                     end = true;
                     break;
                 },
@@ -308,7 +348,10 @@ pub const Reader = struct {
         return list;
     }
 
-    pub fn read_atom(self: *Reader, token: Token) MalType {
+    /// Determine whether the type of representation for the input string,
+    /// which could be boolean, number, string or symbol.
+    /// This returns the lisp object.
+    pub fn read_atom(self: *Reader, token: Token) *MalType {
         var str_al = ArrayList(u8).init(self.allocator);
 
         var iter = StringIterator.init(token);
@@ -364,12 +407,25 @@ pub const Reader = struct {
         const isBoolean = BOOLEAN_MAP.get(token);
 
         var mal: MalType = undefined;
+        // TODO: Free the memory
+        // TODO: Using MalType method instead
+        const mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
+        // utils.log("read_atom", "mal_ptr");
+        // utils.log_pointer(mal_ptr);
+        defer {
+            // TODO: Memory need to be freed elsewhere, to test function,
+            // enable the destroy here to solve memory leak issue temporarily.
+            // Consider copy elsewhere and freed here such that the scope
+            // of the item is clearer if necessary
+            // self.allocator.destroy(mal_ptr);
+        }
 
         // NOTE: Decide the return MalType based on different rules
         // Like keyword case (e.g. if)
         if (isNumber) {
             mal = MalType{
                 .number = .{
+                    .allocator = self.allocator,
                     .value = std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."),
                 },
             };
@@ -384,11 +440,16 @@ pub const Reader = struct {
                 .log();
         } else {
             mal = MalType{
-                .symbol = token,
+                .symbol = .{
+                    .allocator = self.allocator,
+                    .data = token,
+                },
             };
         }
 
-        return mal;
+        mal_ptr.* = mal;
+        // utils.log_pointer(mal_ptr);
+        return mal_ptr;
     }
 };
 

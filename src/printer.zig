@@ -20,14 +20,14 @@ const iterator = @import("iterator.zig");
 const StringIterator = iterator.StringIterator;
 
 /// print_readably: For the false case, show the actual character, e.g. show newline for \n
-pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
+pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
     var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa_allocator.allocator();
 
     var string = ArrayList(u8).init(allocator);
     defer string.deinit();
 
-    switch (mal) {
+    switch (mal.*) {
         .boolean => |boolean| {
             if (boolean) {
                 string.appendSlice(BOOLEAN_TRUE) catch @panic("allocator error");
@@ -112,7 +112,7 @@ pub fn pr_str(mal: MalType, print_readably: bool) []u8 {
             string.appendSlice("]") catch @panic("allocator error");
         },
         .symbol => |symbol| {
-            string.appendSlice(symbol) catch @panic("allocator error");
+            string.appendSlice(symbol.data) catch @panic("allocator error");
         },
         else => {},
     }
@@ -209,7 +209,7 @@ test "printer" {
         list1_al.append(MalType.new_string(str1_al)) catch unreachable;
         list1_al.append(MalType.new_string(str2_al)) catch unreachable;
 
-        const list1 = MalType.new_list(list1_al);
+        const list1 = MalType.new_list(allocator, list1_al);
         const list1_result = pr_str(list1, true);
 
         try testing.expectEqualStrings("(\"1\" \"2\")", list1_result);

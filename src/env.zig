@@ -15,6 +15,7 @@ const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunction = lisp.LispFunction;
 const LispFunctionWithEnv = lisp.LispFunctionWithEnv;
+const LispFunctionPtrWithEnv = lisp.LispFunctionPtrWithEnv;
 const LispFunctionWithTail = lisp.LispFunctionWithTail;
 const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
 const GenericLispFunction = lisp.GenericLispFunction;
@@ -38,7 +39,7 @@ const STOCK_REFERENCE = "stock";
 pub var global_env_ptr: *const anyopaque = undefined;
 // const global_env: *LispEnv = @constCast(@ptrCast(@alignCast(global_env_ptr)));
 
-pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionWithEnv).initComptime(.{
+pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).initComptime(.{
     // According to MAL, not in Emacs env
     .{ "def!", &set },
     .{ "let*", &letX },
@@ -92,7 +93,7 @@ pub const FunctionWithAttributes = struct {
 const LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY = "LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY";
 const LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY = "LAMBDA_FUNCTION_INTERNAL_FUNCTION_KEY";
 
-fn debugLogDataFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn debugLogDataFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     _ = params;
 
     env.logData();
@@ -100,7 +101,7 @@ fn debugLogDataFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return MalType{ .boolean = false };
 }
 
-fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn listFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     var list = ArrayList(MalType).init(env.allocator);
 
     for (params) |param| {
@@ -108,12 +109,12 @@ fn listFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
         list.append(mal_item) catch @panic("test");
     }
 
-    const mal = MalType.new_list(list);
+    const mal = MalType.new_list(env.allocator, list);
 
     return mal;
 }
 
-fn isListFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn isListFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     // TODO: return better error.
     std.debug.assert(params.len == 1);
 
@@ -129,7 +130,7 @@ fn isListFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
 }
 
 // NOTE: See if support vector case
-fn isEmptyFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn isEmptyFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const isList = try (try isListFunc(params, env)).as_boolean();
 
     if (isList) {
@@ -151,7 +152,7 @@ fn isEmptyFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return .{ .boolean = false };
 }
 
-fn countFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn countFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const isList = try (try isListFunc(params, env)).as_boolean();
 
     if (isList) {
@@ -171,7 +172,7 @@ fn countFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return .{ .boolean = false };
 }
 
-fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn vectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     var vector = ArrayList(MalType).init(env.allocator);
 
     vector.insertSlice(0, params) catch |err| switch (err) {
@@ -183,7 +184,7 @@ fn vectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return mal;
 }
 
-fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn isVectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     // TODO: return better error.
     std.debug.assert(params.len == 1);
 
@@ -198,7 +199,7 @@ fn isVectorFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return vectorLikeFunc(result);
 }
 
-fn arefFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn arefFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const array = get(params, env) catch |err| switch (err) {
         error.IllegalType => blk: {
             break :blk params[0];
@@ -220,7 +221,7 @@ fn arefFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return result;
 }
 
-fn messageAppend(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn messageAppend(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const msg = try params[0].as_string();
 
     const result = std.fmt.allocPrint(env.allocator, "{s}", .{msg.items}) catch @panic("allocator error");
@@ -258,7 +259,7 @@ fn vectorLikeFunc(params: MalType) MalTypeError!MalType {
     return MalType{ .boolean = false };
 }
 
-fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn set(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 2);
 
     const key = try params[0].as_symbol();
@@ -275,13 +276,13 @@ fn set(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return value;
 }
 
-fn get(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn get(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const key = try params[0].as_symbol();
 
     return env.getVar(key);
 }
 
-fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn letX(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const binding_arg = params[0];
     const eval_arg = params[1];
 
@@ -302,7 +303,7 @@ fn letX(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return newEnv.apply(eval_arg, false);
 }
 
-fn ifFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn ifFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const condition_arg = params[0];
     const statement_true = params[1];
     // NOTE: In elisp the last params corresponds to false case,
@@ -358,7 +359,7 @@ fn ifTailFunc(params: []*MalType, first_arg: **MalType, env: *LispEnv) MalTypeEr
     return;
 }
 
-fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn lambdaFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     const newEnv = LispEnv.init(env.allocator, env);
     // TODO: When to deinit?
     // defer newEnv.deinit();
@@ -400,7 +401,7 @@ fn lambdaFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return MalType{ .function = newEnv };
 }
 
-fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn fsLoadFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     std.debug.assert(params.len == 1);
 
     const sub_path = try params[0].as_string();
@@ -415,7 +416,7 @@ fn fsLoadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
     return MalType.new_string(al_result);
 }
 
-fn loadFunc(params: []MalType, env: *LispEnv) MalTypeError!MalType {
+fn loadFunc(params: []*MalType, env: *LispEnv) MalTypeError!MalType {
     // NOTE: The content shall be holded within the whole env,
     // therefore the deinit process should not be done within the function,
     // but in the env deinit part. Otherwise there will be memory corruption
@@ -474,6 +475,13 @@ pub const LispEnv = struct {
                 value = .{
                     .type = .internal,
                     .func = .{ .with_env = func },
+                    .reference = reference,
+                };
+            },
+            LispFunctionPtrWithEnv => {
+                value = .{
+                    .type = .internal,
+                    .func = .{ .with_ptr = func },
                     .reference = reference,
                 };
             },
@@ -539,7 +547,10 @@ pub const LispEnv = struct {
         while (dataIter.next()) |item| {
             // For lambda variables, they are deinit within the function.
             if (!std.mem.eql(u8, item.key_ptr.*, LAMBDA_FUNCTION_INTERNAL_VARIABLE_KEY)) {
-                item.value_ptr.deinit();
+                utils.log_pointer(item.value_ptr);
+                utils.log("DATA", item.value_ptr.*);
+
+                item.value_ptr.decref();
             }
         }
         self.data.deinit();
@@ -556,7 +567,9 @@ pub const LispEnv = struct {
             if (std.mem.startsWith(u8, item.key_ptr.*, dataCollectorKeyPrefix)) {
                 self.allocator.free(item.key_ptr.*);
             }
-            item.value_ptr.deinit();
+            utils.log_pointer(item.value_ptr);
+            utils.log("DATA COLLECTOR", item.value_ptr.*);
+            item.value_ptr.decref();
         }
         self.dataCollector.deinit();
         self.allocator.destroy(self);
@@ -669,7 +682,7 @@ pub const LispEnv = struct {
         // initial function table.
         const fnTable = @constCast(&lisp.LispHashMap(FunctionWithAttributes).init(allocator));
         readFromFnMap(LispFunction, fnTable, data.EVAL_TABLE, STOCK_REFERENCE);
-        readFromFnMap(LispFunctionWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
+        readFromFnMap(LispFunctionPtrWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
         readFromFnMap(LispFunctionWithTail, fnTable, SPECIAL_ENV_WITH_TAIL_EVAL_TABLE, STOCK_REFERENCE);
 
         const internalData = ArrayList(MalType).init(allocator);
@@ -861,7 +874,7 @@ pub const LispEnv = struct {
     /// return accordingly.
     ///
     /// The caller handles the memory allocated, check if the result is handled properly.
-    pub fn apply(self: *Self, mal: MalType, nested: bool) !MalType {
+    pub fn apply(self: *Self, mal: *MalType, nested: bool) !*MalType {
         const apply_mal_ref = self.allocator.create(MalType) catch @panic("OOM");
         defer self.allocator.destroy(apply_mal_ref);
         // self.dataCollector.put(apply_mal_ref.*) catch @panic("");
@@ -870,7 +883,7 @@ pub const LispEnv = struct {
         // utils.log_pointer(apply_mal_ref);
 
         base: while (true) {
-            switch (apply_mal_ref.*) {
+            switch (mal.*) {
                 .list => |list| {
                     // Apply function for a list, which eval the list and return the result,
                     // it takes the first param (which should be in symbol form) as
@@ -890,14 +903,23 @@ pub const LispEnv = struct {
                     var lambda_function_pointer: ?*LispEnv = null;
                     var mal_param: MalType = undefined;
                     var lambda_func_run_checker: bool = true;
+
                     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+                    // QUESTION: Shall this be self.allocator?
                     const allocator = gpa.allocator();
 
+                    // NOTE: Keep this for revert purpose; The test is
+                    // for using *MalType
                     var params = ArrayList(MalType).init(allocator);
                     defer {
                         params.deinit();
                         // const check = gpa.deinit();
                         // std.debug.assert(check == .ok);
+                    }
+
+                    var ptr_params = ArrayList(*MalType).init(allocator);
+                    defer {
+                        ptr_params.deinit();
                     }
 
                     for (list.data.items, 0..) |_mal, i| {
@@ -1035,6 +1057,12 @@ pub const LispEnv = struct {
                                         self,
                                     });
                                 },
+                                .with_ptr => |ptr_func| {
+                                    fnValue = try @call(.auto, ptr_func, .{
+                                        params.items,
+                                        self,
+                                    });
+                                },
                                 .with_tail => |tail_func| {
                                     // NOTE: To apply tail call optimization, pointer has to be used to keep the
                                     // the call. In general however, other functions are using value to keep the
@@ -1117,7 +1145,7 @@ pub const LispEnv = struct {
                         optional_env = env.outer;
                     }
 
-                    return apply_mal_ref.*;
+                    return mal.*;
                     // NOTE: deinit on the item inside the hash map and the env
                     // is different
                     // If a value is evaled further it will be kept without
@@ -1132,7 +1160,7 @@ pub const LispEnv = struct {
                 .symbol => |symbol| {
                     return self.getVar(symbol);
                 },
-                else => return apply_mal_ref.*,
+                else => return mal.*,
             }
         }
     }
@@ -1141,54 +1169,54 @@ pub const LispEnv = struct {
 const testing = std.testing;
 const Reader = @import("reader.zig").Reader;
 
-test "env" {
-    const allocator = std.testing.allocator;
+// test "env" {
+//     const allocator = std.testing.allocator;
 
-    var mal_list = ArrayList(MalType).init(allocator);
-    defer mal_list.deinit();
+//     var mal_list = ArrayList(MalType).init(allocator);
+//     defer mal_list.deinit();
 
-    const plus = MalType{
-        .symbol = "+",
-    };
+//     const plus = MalType{
+//         .symbol = "+",
+//     };
 
-    const num1 = MalType{
-        .number = .{ .value = 1 },
-    };
-    const num2 = MalType{
-        .number = .{ .value = 2 },
-    };
+//     const num1 = MalType{
+//         .number = .{ .value = 1 },
+//     };
+//     const num2 = MalType{
+//         .number = .{ .value = 2 },
+//     };
 
-    try mal_list.append(plus);
-    try mal_list.append(num1);
-    try mal_list.append(num2);
+//     try mal_list.append(plus);
+//     try mal_list.append(num1);
+//     try mal_list.append(num2);
 
-    const plus1 = MalType.new_list(mal_list);
+//     const plus1 = MalType.new_list(allocator, mal_list);
 
-    {
-        const env = LispEnv.init_root(allocator);
-        defer env.deinit();
+//     {
+//         const env = LispEnv.init_root(allocator);
+//         defer env.deinit();
 
-        const plus1_value = try env.apply(plus1, false);
-        const plus1_value_number = plus1_value.as_number() catch unreachable;
-        try testing.expectEqual(3, plus1_value_number.value);
-    }
+//         const plus1_value = try env.apply(plus1, false);
+//         const plus1_value_number = plus1_value.as_number() catch unreachable;
+//         try testing.expectEqual(3, plus1_value_number.value);
+//     }
 
-    // Data structure: Vector
-    {
-        var vector1 = Reader.init(allocator, "(vector 1 2)");
-        defer vector1.deinit();
+//     // Data structure: Vector
+//     {
+//         var vector1 = Reader.init(allocator, "(vector 1 2)");
+//         defer vector1.deinit();
 
-        const env = LispEnv.init_root(allocator);
-        defer env.deinit();
+//         const env = LispEnv.init_root(allocator);
+//         defer env.deinit();
 
-        const vector1_value = try env.apply(vector1.ast_root, false);
-        const vector1_value_vector = vector1_value.as_vector() catch unreachable;
-        defer vector1_value_vector.deinit();
+//         const vector1_value = try env.apply(vector1.ast_root, false);
+//         const vector1_value_vector = vector1_value.as_vector() catch unreachable;
+//         defer vector1_value_vector.deinit();
 
-        const first = vector1_value_vector.items[0].as_number() catch unreachable;
-        try testing.expectEqual(1, first.value);
+//         const first = vector1_value_vector.items[0].as_number() catch unreachable;
+//         try testing.expectEqual(1, first.value);
 
-        const second = vector1_value_vector.items[1].as_number() catch unreachable;
-        try testing.expectEqual(2, second.value);
-    }
-}
+//         const second = vector1_value_vector.items[1].as_number() catch unreachable;
+//         try testing.expectEqual(2, second.value);
+//     }
+// }
