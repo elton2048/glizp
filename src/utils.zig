@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const maxInt = std.math.maxInt;
 const print = std.debug.print;
 const assert = std.debug.assert;
@@ -50,15 +51,26 @@ pub const LogOption = struct {
 
 /// Log function with color setting
 pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype, option: LogOption) void {
+    const show = option.test_only and builtin.is_test or !option.test_only;
+
+    if (!show) {
+        return;
+    }
+
     if (option.color != .Reset) {
-        std.debug.print("\x1b[{d}m", .{@intFromEnum(option.color)});
+        set_terminal_color(option.color);
     }
     if (!std.mem.eql(u8, key, "")) {
         std.debug.print("[{s}]: ", .{key});
     }
     std.debug.print(message, args);
     std.debug.print("\n", .{});
-    std.debug.print("\x1b[0m", .{});
+    set_terminal_color(.Reset);
+}
+
+/// Helper function to set the terminal color.
+pub fn set_terminal_color(color: AnsiColor) void {
+    std.debug.print("\x1b[{d}m", .{@intFromEnum(color)});
 }
 
 pub fn log_pointer(ptr: anytype) void {
