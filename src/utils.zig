@@ -47,11 +47,14 @@ pub const LogOption = struct {
     color: AnsiColor = .Reset,
     /// Whether the log is shown in test cases only.
     test_only: bool = false,
+    /// Whether the log is enabled; Shall override other shown-related
+    /// properties if disabled.
+    enable: bool = true,
 };
 
 /// Log function with color setting
 pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype, option: LogOption) void {
-    const show = option.test_only and builtin.is_test or !option.test_only;
+    const show = option.enable and option.test_only and (builtin.is_test or !option.test_only);
 
     if (!show) {
         return;
