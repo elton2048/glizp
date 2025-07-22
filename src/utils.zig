@@ -54,7 +54,7 @@ pub const LogOption = struct {
 
 /// Log function with color setting
 pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype, option: LogOption) void {
-    const show = option.enable and option.test_only and (builtin.is_test or !option.test_only);
+    const show = option.enable and (!option.test_only or (builtin.is_test and option.test_only));
 
     if (!show) {
         return;
