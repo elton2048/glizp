@@ -200,6 +200,22 @@ pub const MalType = union(enum) {
     }
 
     pub const INCOMPLETED = @constCast(&MalType{ .Incompleted = undefined });
+    pub const TRUE = @constCast(&MalType{ .boolean = true });
+    pub const FALSE = @constCast(&MalType{ .boolean = false });
+
+    pub fn new_boolean_ptr(data: bool) *MalType {
+        if (data) {
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+    pub fn new_boolean(data: bool) MalType {
+        if (data) {
+            return TRUE.*;
+        }
+        return FALSE.*;
+    }
 
     pub fn new_string(data: ArrayList(u8)) MalType {
         return .{ .string = .{

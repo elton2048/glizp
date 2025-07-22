@@ -57,7 +57,7 @@ fn forwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     const steps_value = try steps.to_usize();
     self.movePoint(steps_value, true);
 
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 fn backwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
@@ -82,7 +82,7 @@ fn backwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
     const steps_value = try steps.to_usize();
     self.movePoint(steps_value, false);
 
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 fn insert(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
@@ -104,7 +104,7 @@ fn insert(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
 
     // Corresponds to nil
     // TODO: See if extract this as a new type like Qnil.
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 fn deleteChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
@@ -131,7 +131,7 @@ fn deleteChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
         };
     }
 
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 fn deleteBackwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType {
@@ -160,7 +160,7 @@ fn deleteBackwardChar(params: []*MalType, env: *anyopaque) MalTypeError!*MalType
         };
     }
 
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 pub const PluginEditing = struct {

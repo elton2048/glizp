@@ -121,12 +121,12 @@ fn letX(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
 
 fn listLikeFunc(params: *MalType) MalTypeError!*MalType {
     if (params.as_list()) |_| {
-        return @constCast(&MalType{ .boolean = true });
+        return MalType.new_boolean_ptr(true);
     } else |_| {
-        return @constCast(&MalType{ .boolean = false });
+        return MalType.new_boolean_ptr(false);
     }
 
-    return @constCast(&MalType{ .boolean = false });
+    return MalType.new_boolean_ptr(false);
 }
 
 fn listFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
@@ -184,7 +184,7 @@ fn arefFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     const index_num = try params[1].as_number();
     const index = try index_num.to_usize();
 
-    var result: *MalType = @constCast(&MalType{ .boolean = false });
+    var result = MalType.new_boolean_ptr(false);
 
     if (index < vector.items.len) {
         result = vector.items[index];
@@ -505,7 +505,7 @@ pub const LispEnv = struct {
         }
 
         // TODO: Return error signal
-        return @constCast(&MalType{ .boolean = false });
+        return MalType.new_boolean_ptr(false);
     }
 
     pub fn removeVar(self: *Self, key: []const u8) void {
@@ -770,7 +770,7 @@ pub const LispEnv = struct {
 
                             return fnValue;
                         } else {
-                            return @constCast(&MalType{ .boolean = false });
+                            return MalType.new_boolean_ptr(false);
                         }
 
                         // For lambda function case, excepted to have an inner eval

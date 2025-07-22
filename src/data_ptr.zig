@@ -56,31 +56,31 @@ const ARITHMETIC_COMPARE_OPERATION = enum(ArithCompareResult) {
 fn eqlsign(params: []*MalType) MalTypeError!MalType {
     const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq));
 
-    return MalType{ .boolean = result };
+    return MalType.new_boolean(result);
 }
 
 fn lss(params: []*MalType) MalTypeError!MalType {
     const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.lt));
 
-    return MalType{ .boolean = result };
+    return MalType.new_boolean(result);
 }
 
 fn leq(params: []*MalType) MalTypeError!MalType {
     const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq) | @intFromEnum(ARITHMETIC_COMPARE_OPERATION.lt));
 
-    return MalType{ .boolean = result };
+    return MalType.new_boolean(result);
 }
 
 fn gtr(params: []*MalType) MalTypeError!MalType {
     const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.gt));
 
-    return MalType{ .boolean = result };
+    return MalType.new_boolean(result);
 }
 
 fn geq(params: []*MalType) MalTypeError!MalType {
     const result = try arithcompare_driver(params, @intFromEnum(ARITHMETIC_COMPARE_OPERATION.eq) | @intFromEnum(ARITHMETIC_COMPARE_OPERATION.gt));
 
-    return MalType{ .boolean = result };
+    return MalType.new_boolean(result);
 }
 
 /// To perform arithmatic comparsion, perform AND operation with desired ArithCompareResult bits setting
