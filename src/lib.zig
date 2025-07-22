@@ -8,5 +8,5 @@ pub const lisp = @import("types/lisp.zig");
 pub const printer = @import("printer.zig");
 pub const fs = @import("fs.zig");
 
-pub const LispEnv = @import("env.zig").LispEnv;
+pub const LispEnv = @import("env_ptr.zig").LispEnv;
 pub const Reader = token_reader.Reader;

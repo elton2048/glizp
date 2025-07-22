@@ -29,7 +29,7 @@ vtable: *const VTable,
 /// Name of the plugin.
 name: []const u8,
 /// Corresponding environment data.
-envData: *std.StringHashMap(MalType),
+envData: *std.StringHashMap(*MalType),
 /// Corresponding queue data. Used for event subscription from async handler.
 queue: *MessageQueue,
 
@@ -51,7 +51,7 @@ pub fn subscribeEvent(self: Self) !void {
 
 const Self = @This();
 
-pub fn init(obj: anytype, envData: *std.StringHashMap(MalType), messages: *MessageQueue) Self {
+pub fn init(obj: anytype, envData: *std.StringHashMap(*MalType), messages: *MessageQueue) Self {
     const TypePtr = @TypeOf(obj);
     const Type = @TypeOf(obj.*);
 

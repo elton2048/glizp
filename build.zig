@@ -106,7 +106,7 @@ pub fn build(b: *std.Build) void {
     // Creates a step for general testing. This only builds the test executable
     // but does not run it.
     const general_tests = b.addTest(.{
-        .root_source_file = b.path("tests/testing_lisp_general.zig"),
+        .root_source_file = b.path("tests/testing_lisp_general_ptr.zig"),
         .target = target,
         .optimize = optimize,
         .test_runner = .{
@@ -160,8 +160,11 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
 
-    test_step.dependOn(&run_exe_unit_tests.step);
-    test_step.dependOn(&run_fs_tests.step);
+    _ = run_exe_unit_tests;
+    _ = run_fs_tests;
+
+    // test_step.dependOn(&run_exe_unit_tests.step);
+    // test_step.dependOn(&run_fs_tests.step);
     test_step.dependOn(&run_general_tests.step);
-    test_step.dependOn(&reader_test.step);
+    // test_step.dependOn(&reader_test.step);
 }

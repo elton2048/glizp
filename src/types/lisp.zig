@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const hash_map = std.hash_map;
 const Allocator = std.mem.Allocator;
 
@@ -6,11 +7,13 @@ const ArrayList = std.ArrayList;
 const HashMap = hash_map.HashMap;
 
 const utils = @import("../utils.zig");
-const LispEnv = @import("../env.zig").LispEnv;
+const LispEnv = @import("../env_ptr.zig").LispEnv;
 
-pub const LispFunction = *const fn ([]MalType) MalTypeError!MalType;
+pub const LispFunction = *const fn ([]*MalType) MalTypeError!MalType;
 
 pub const LispFunctionWithEnv = *const fn ([]MalType, *LispEnv) MalTypeError!MalType;
+
+pub const LispFunctionPtrWithEnv = *const fn ([]*MalType, *LispEnv) MalTypeError!*MalType;
 
 /// For function with tail call optimization, there is no return as it should keep looping
 /// until the second arg (*MalType) is eval to be non-list type.
@@ -18,16 +21,17 @@ pub const LispFunctionWithTail = *const fn ([]*MalType, **MalType, *LispEnv) Mal
 
 /// For plugin purpose, the function shall allow to reference back
 /// to the plugin instance, which is denoted as *anyopaque.
-pub const LispFunctionWithOpaque = *const fn ([]MalType, *anyopaque) MalTypeError!MalType;
+pub const LispFunctionWithOpaque = *const fn ([]*MalType, *anyopaque) MalTypeError!*MalType;
 
 pub const GenericLispFunction = union(enum) {
     simple: LispFunction,
     with_env: LispFunctionWithEnv,
+    with_ptr: LispFunctionPtrWithEnv,
     with_tail: LispFunctionWithTail,
     plugin: LispFunctionWithOpaque,
 };
 
-pub const List = ArrayList(MalType);
+pub const List = ArrayList(*MalType);
 
 pub const Vector = List;
 
@@ -42,7 +46,10 @@ pub const NumberType = f64;
 
 pub const ReferenceCountType = u64;
 
+/// Number representation in lisp. It is possible the number does not
+/// associate into an allocator.
 pub const NumberData = struct {
+    allocator: ?std.mem.Allocator = null,
     value: NumberType,
     reference_count: ReferenceCountType = 1,
 
@@ -70,6 +77,7 @@ pub const NumberData = struct {
 /// An array which is ordered sequence of characters. The basic way
 /// to create is by using double quotes.
 pub const StringData = struct {
+    allocator: ?std.mem.Allocator = null,
     data: ArrayList(u8),
     reference_count: ReferenceCountType = 1,
 };
@@ -77,21 +85,25 @@ pub const StringData = struct {
 /// As symbol is using slice instead of ArrayList in the current implementation,
 /// they are separated into two types.
 pub const SymbolData = struct {
-    data: ArrayList(u8),
+    allocator: ?std.mem.Allocator = null,
+    data: []const u8,
     reference_count: ReferenceCountType = 1,
 };
 
 pub const ListData = struct {
+    allocator: std.mem.Allocator,
     data: List,
     reference_count: ReferenceCountType = 1,
 };
 
 pub const VectorData = struct {
+    allocator: std.mem.Allocator,
     data: Vector,
     reference_count: ReferenceCountType = 1,
 };
 
 pub const FunctionData = struct {
+    // allocator: std.mem.Allocator,
     data: *LispEnv,
     reference_count: ReferenceCountType = 1,
 };
@@ -106,14 +118,14 @@ pub const MalType = union(enum) {
     /// Vector type, which provide constant-time element access
     vector: VectorData,
     /// General symbol type including function keyword
-    symbol: []const u8,
+    symbol: SymbolData,
 
     function: *LispEnv,
 
     SExprEnd,
     VectorExprEnd,
     /// Incompleted type from parser
-    Incompleted,
+    Incompleted: void,
     /// Undefined param for function
     Undefined,
 
@@ -125,10 +137,15 @@ pub const MalType = union(enum) {
 
             switch (self) {
                 .symbol => |symbol| {
-                    try std.fmt.format(writer, ".symbol: '{s}'", .{symbol});
+                    try std.fmt.format(writer, ".symbol: '{s}'; count: {d}", .{ symbol.data, symbol.reference_count });
                 },
                 .number => |number| {
-                    try std.fmt.format(writer, ".number: {d}", .{number.value});
+                    try std.fmt.format(writer, "\x1b[35m", .{});
+                    try std.fmt.format(writer, ".number: {d}; count: {d}", .{
+                        number.value,
+                        number.reference_count,
+                    });
+                    try std.fmt.format(writer, "\x1b[0m", .{});
                 },
                 .boolean => |boolean| {
                     try std.fmt.format(writer, ".boolean: {any}", .{boolean});
@@ -148,15 +165,19 @@ pub const MalType = union(enum) {
                     }
                 },
                 .string => |string| {
+                    try std.fmt.format(writer, "count: {d}; ", .{string.reference_count});
                     try std.fmt.format(writer, ".string: '{s}'", .{string.data.items});
                 },
                 .list => |list| {
                     // TODO: Need level control, limit or better formatting?
+                    try std.fmt.format(writer, "count: {d}", .{list.reference_count});
                     try std.fmt.format(writer, ".list: ", .{});
                     for (list.data.items, 0..) |item, i| {
                         try writer.writeAll("{ ");
                         try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
                         try writer.writeAll(" }");
+
+                        try std.fmt.format(writer, "pointer: {*}", .{item});
                     }
                 },
                 .vector => |vector| {
@@ -178,41 +199,127 @@ pub const MalType = union(enum) {
         }
     }
 
+    pub const INCOMPLETED = @constCast(&MalType{ .Incompleted = undefined });
+
     pub fn new_string(data: ArrayList(u8)) MalType {
         return .{ .string = .{
             .data = data,
         } };
     }
 
-    pub fn new_list(data: List) MalType {
+    pub fn new_string_ptr(allocator: std.mem.Allocator, data: ArrayList(u8)) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+        mal_ptr.* = .{ .string = .{
+            .allocator = allocator,
+            .data = data,
+        } };
+
+        return mal_ptr;
+    }
+
+    pub fn new_list(allocator: std.mem.Allocator, data: List) MalType {
         return .{ .list = .{
+            .allocator = allocator,
             .data = data,
         } };
     }
 
-    pub fn new_vector(data: Vector) MalType {
+    pub fn new_vector(allocator: std.mem.Allocator, data: Vector) MalType {
         return .{ .vector = .{
+            .allocator = allocator,
             .data = data,
         } };
     }
 
-    // TODO: Consider add checking for reference count
-    pub fn deinit(self: MalType) void {
-        switch (self) {
+    pub fn new_symbol(allocator: std.mem.Allocator, data: []const u8) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+        mal_ptr.* = .{ .symbol = .{
+            .allocator = allocator,
+            .data = data,
+        } };
+
+        return mal_ptr;
+    }
+
+    pub fn new_empty_list_ptr(allocator: std.mem.Allocator) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = MalType{ .list = .{
+            .allocator = allocator,
+            .data = List.init(allocator),
+        } };
+
+        return mal_ptr;
+    }
+
+    pub fn new_list_ptr(allocator: std.mem.Allocator, data: List) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = MalType{ .list = .{
+            .allocator = allocator,
+            .data = data,
+        } };
+
+        return mal_ptr;
+    }
+
+    pub fn new_vector_ptr(allocator: std.mem.Allocator, data: Vector) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+        const mal = new_vector(allocator, data);
+
+        mal_ptr.* = mal;
+
+        return mal_ptr;
+    }
+
+    pub fn new_number(allocator: std.mem.Allocator, data: NumberType) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = .{
+            .number = .{
+                .allocator = allocator,
+                .value = data,
+            },
+        };
+
+        return mal_ptr;
+    }
+
+    pub fn deinit(self: *MalType) void {
+        utils.log("DEINIT entry", "{*}; {any}", .{ self, self }, .{ .test_only = true });
+
+        switch (self.*) {
+            .symbol => |symbol| {
+                if (symbol.allocator) |allocator| {
+                    allocator.destroy(self);
+                }
+            },
+            .number => |number| {
+                if (number.allocator) |allocator| {
+                    allocator.destroy(self);
+                }
+            },
             .string => |string| {
                 string.data.deinit();
+                if (string.allocator) |allocator| {
+                    allocator.destroy(self);
+                }
             },
             .list => |list| {
                 for (list.data.items) |item| {
-                    item.deinit();
+                    item.decref();
                 }
                 list.data.deinit();
+
+                list.allocator.destroy(self);
             },
             .vector => |vector| {
                 for (vector.data.items) |item| {
                     item.deinit();
                 }
                 vector.data.deinit();
+
+                vector.allocator.destroy(self);
             },
             // NOTE: Using the root env to deinit, but it seems a bit
             // magical?
@@ -236,10 +343,46 @@ pub const MalType = union(enum) {
         return self;
     }
 
+    /// Copy MalType into designated allocator. The underlying data
+    /// should also be copied into designated allocator.
+    /// Not being used. Consider remove this.
+    pub fn copy(self: *MalType, allocator: std.mem.Allocator) *MalType {
+        utils.log("lisp", "COPY", .{}, .{});
+        // const new_object = allocator.create(MalType) catch @panic("OOM");
+
+        var new_object: *MalType = undefined;
+        switch (self.*) {
+            .string => |string| {
+                var original_data = string.data;
+                var original_data_unmanaged = original_data.moveToUnmanaged();
+
+                var new_data_unmanaged = original_data_unmanaged.clone(allocator) catch @panic("");
+                const new_data = new_data_unmanaged.toManaged(allocator);
+
+                new_object = MalType.new_string_ptr(allocator, new_data);
+            },
+            .number => |number| {
+                new_object = allocator.create(MalType) catch @panic("OOM");
+                new_object.* = .{ .number = .{
+                    .allocator = allocator,
+                    .value = number.value,
+                    .reference_count = number.reference_count,
+                } };
+            },
+            else => {
+                new_object = allocator.create(MalType) catch @panic("OOM");
+                new_object.* = self.*;
+                // @panic("Not yet implemented");
+            },
+        }
+
+        return new_object;
+    }
+
     pub fn as_symbol(self: MalType) MalTypeError![]const u8 {
         switch (self) {
             .symbol => |symbol| {
-                return symbol;
+                return symbol.data;
             },
             else => return MalTypeError.IllegalType,
         }
@@ -272,7 +415,7 @@ pub const MalType = union(enum) {
         }
     }
 
-    pub fn as_list(self: MalType) MalTypeError!ArrayList(MalType) {
+    pub fn as_list(self: MalType) MalTypeError!ArrayList(*MalType) {
         switch (self) {
             .list => |list| {
                 return list.data;
@@ -290,6 +433,33 @@ pub const MalType = union(enum) {
         }
     }
 
+    pub fn as_number_ptr(self: *MalType) MalTypeError!NumberData {
+        switch (self.*) {
+            .number => |num| {
+                return num;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_list_ptr(self: MalType) MalTypeError!ArrayList(*MalType) {
+        switch (self) {
+            .list => |list| {
+                return list.data;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
+    pub fn as_vector_ptr(self: *MalType) MalTypeError!Vector {
+        switch (self.*) {
+            .vector => |vector| {
+                return vector.data;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
     pub fn as_function(self: MalType) MalTypeError!*LispEnv {
         switch (self) {
             .function => |func| {
@@ -299,15 +469,19 @@ pub const MalType = union(enum) {
         }
     }
 
+    /// Increase reference count for a lisp object.
     pub fn incref(self: *MalType) void {
         // A procedure instead of a function returning its argument
         // because it must most of the time be applied *after* a
         // successful assignment.
         // zig fmt: off
         switch (self.*) {
-            .list, .vector                => |*l| l.reference_count += 1,
-            .number                       => |*l| l.reference_count += 1,
-            .keyword, .string, .symbol    => |*l| l.reference_count += 1,
+            .list          => |*l| l.reference_count += 1,
+            .vector        => |*l| l.reference_count += 1,
+            .number,       => |*l| l.reference_count += 1,
+            .string        => |*l| l.reference_count += 1,
+            .symbol              => |*l| l.reference_count += 1,
+            else => {},
             // .fncore                    => |*l| l.reference_count += 1,
             // .func                      => |*l| l.reference_count += 1,
             // .atom                      => |*l| l.reference_count += 1,
@@ -316,12 +490,102 @@ pub const MalType = union(enum) {
         }
         // zig fmt: on
     }
+
+    pub fn decref(self: *MalType) void {
+        switch (self.*) {
+            .symbol => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .number => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .string => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .list => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .vector => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            else => {},
+            // NOTE: Keep as reference
+            // else => |*l| {
+            //     if (l.reference_count == 0) {
+            //         return;
+            //     }
+
+            //     l.reference_count -= 1;
+            //     if (l.reference_count == 0) {
+            //         self.deinit();
+            //     }
+            // },
+        }
+    }
+
+    pub fn ref(self: MalType) ReferenceCountType {
+        switch (self) {
+            .number => |num| {
+                return num.reference_count;
+            },
+            .symbol => |sym| {
+                return sym.reference_count;
+            },
+            .string => |string| {
+                return string.reference_count;
+            },
+            .list => |list| {
+                return list.reference_count;
+            },
+            .vector => |vector| {
+                return vector.reference_count;
+            },
+            else => {
+                return 1;
+            },
+        }
+    }
 };
 
 const MalTypeContext = struct {
     pub fn hash(_: @This(), key: *MalType) u64 {
         return switch (key.*) {
-            .symbol => |s| hash_map.hashString(s),
+            .symbol => |s| hash_map.hashString(s.data),
             .string => |str| hash_map.hashString(str.data.items),
             else => unreachable,
         };
@@ -330,7 +594,7 @@ const MalTypeContext = struct {
     pub fn eql(_: @This(), ma: *MalType, mb: *MalType) bool {
         return switch (ma.*) {
             .symbol => |a| switch (mb.*) {
-                .symbol => |b| hash_map.eqlString(a, b),
+                .symbol => |b| hash_map.eqlString(a.data, b.data),
                 else => false,
             },
             .string => |a| switch (mb.*) {
@@ -399,9 +663,8 @@ test "LispHashMap" {
     var lispHashMap = LispHashMap([]const u8).init(allocator);
     defer lispHashMap.deinit();
 
-    const key1 = allocator.create(MalType) catch @panic("OOM");
-    defer allocator.destroy(key1);
-    key1.* = MalType{ .symbol = "test1" };
+    const key1 = MalType.new_symbol(allocator, "test1");
+    defer key1.decref();
 
     const value1 = "value1";
     lispHashMap.put(key1, value1) catch @panic("Unexpected error in putting value in LispHashMap.");
