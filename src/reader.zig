@@ -385,52 +385,23 @@ pub const Reader = struct {
         }
         const isBoolean = BOOLEAN_MAP.get(token);
 
-        var mal: MalType = undefined;
-        // TODO: Free the memory
-        // TODO: Using MalType method instead
-        const mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
-        // utils.log("read_atom", "mal_ptr");
-        // utils.log_pointer(mal_ptr);
-        defer {
-            // TODO: Memory need to be freed elsewhere, to test function,
-            // enable the destroy here to solve memory leak issue temporarily.
-            // Consider copy elsewhere and freed here such that the scope
-            // of the item is clearer if necessary
-            // self.allocator.destroy(mal_ptr);
-        }
+        var mal_ptr: *MalType = undefined;
 
         // NOTE: Decide the return MalType based on different rules
         // Like keyword case (e.g. if)
         if (isNumber) {
-            mal = MalType{
-                .number = .{
-                    .allocator = self.allocator,
-                    .value = std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."),
-                },
-            };
+            mal_ptr = MalType.new_number(self.allocator, std.fmt.parseFloat(f64, token) catch @panic("Unexpected overflow."));
         } else if (isBoolean) |mal_bool| {
-            mal = MalType{
-                .boolean = mal_bool,
-            };
+            mal_ptr = MalType.new_boolean_ptr(mal_bool);
         } else if (isString) {
-            mal = MalType{ .string = .{
-                .allocator = self.allocator,
-                .data = str_al,
-            } };
+            mal_ptr = MalType.new_string_ptr(self.allocator, str_al);
             logz.info()
                 .fmt("[LOG]", "str_al result: {any}", .{str_al.items})
                 .log();
         } else {
-            mal = MalType{
-                .symbol = .{
-                    .allocator = self.allocator,
-                    .data = token,
-                },
-            };
+            mal_ptr = MalType.new_symbol(self.allocator, token);
         }
 
-        mal_ptr.* = mal;
-        // utils.log_pointer(mal_ptr);
         return mal_ptr;
     }
 };
