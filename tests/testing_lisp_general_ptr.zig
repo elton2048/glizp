@@ -117,6 +117,80 @@ test "let* function - multiple let* case" {
     try testing.expectEqualStrings("5", result);
 }
 
+test "if function - normal truthy case" {
+    // if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var if_statement = Reader.init(allocator, "(if (= 2 2) (+ 1 1) (+ 10 0))");
+    defer if_statement.deinit();
+
+    try testing.expect(if_statement.ast_root.* == .list);
+
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
+    defer if_statement_value.decref();
+
+    const result = printer.pr_str(if_statement_value, true);
+    try testing.expectEqualStrings("2", result);
+}
+
+test "if function - normal falsy case" {
+    // if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var if_statement = Reader.init(allocator, "(if (= 2 1) (+ 1 1) (+ 10 0))");
+    defer if_statement.deinit();
+
+    try testing.expect(if_statement.ast_root.* == .list);
+
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
+    defer if_statement_value.decref();
+
+    const result = printer.pr_str(if_statement_value, true);
+    try testing.expectEqualStrings("10", result);
+}
+
+test "if function - incompleted truthy case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var if_statement = Reader.init(allocator, "(if (= 2 2) 1)");
+    defer if_statement.deinit();
+
+    try testing.expect(if_statement.ast_root.* == .list);
+
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
+    defer if_statement_value.decref();
+
+    const result = printer.pr_str(if_statement_value, true);
+    try testing.expectEqualStrings("1", result);
+}
+
+test "if function - non-boolean case" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var if_statement = Reader.init(allocator, "(if 91 (+ 1 1) (+ 1 0))");
+    defer if_statement.deinit();
+
+    try testing.expect(if_statement.ast_root.* == .list);
+
+    const if_statement_value = try env.apply(if_statement.ast_root, false);
+    defer if_statement_value.decref();
+
+    const result = printer.pr_str(if_statement_value, true);
+    try testing.expectEqualStrings("2", result);
+}
+
 test "list function - simple case" {
     // if (true) return error.SkipZigTest;
     const allocator = testing.allocator;

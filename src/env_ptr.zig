@@ -53,6 +53,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).i
     // According to MAL, not in Emacs env
     .{ "def!", &set },
     .{ "let*", &letX },
+    .{ "if", &ifFunc },
 
     // TODO: See if need to extract this out?
     .{ "list", &listFunc },
@@ -117,6 +118,41 @@ fn letX(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     }
 
     return newEnv.apply(eval_arg, false);
+}
+
+fn ifFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    const condition_arg = params[0];
+    const statement_true = params[1];
+    // NOTE: In elisp the last params corresponds to false case,
+    // it is not the case right now.
+    // i.e. (if (= 1 2) 1 2 3 4) => 4
+    var statement_false: *MalType = undefined;
+
+    if (params.len == 1) {
+        // TODO: Better error type
+        return MalTypeError.IllegalType;
+    }
+
+    if (params.len == 2) {
+        statement_false = MalType.new_boolean_ptr(false);
+    } else {
+        statement_false = params[2];
+    }
+
+    condition_arg.incref();
+    statement_false.incref();
+    statement_true.incref();
+
+    const condition = (try env.apply(condition_arg, false)).as_boolean() catch blk: {
+        // The condition_arg has been eval in this case, hence decrease
+        // the reference count.
+        condition_arg.decref();
+        break :blk true;
+    };
+    if (!condition) {
+        return env.apply(statement_false, false);
+    }
+    return env.apply(statement_true, false);
 }
 
 fn listLikeFunc(params: *MalType) MalTypeError!*MalType {
@@ -629,6 +665,11 @@ pub const LispEnv = struct {
                             }
                         } else
 
+                        // For if case, statements are handled within the function
+                        if (std.hash_map.eqlString(fnName, "if")) {
+                            mal_ptr_param = mal_item;
+                        } else
+
                         // TODO: Simple and lazy way for checking "special" form
                         if (SPECIAL_ENV_EVAL_TABLE.has(fnName)) {
                             switch (mal_item.*) {
@@ -636,6 +677,7 @@ pub const LispEnv = struct {
                                     // TODO: Need more assertion
                                     // Assume the return type fits with the function
                                     mal_ptr_param = try self.apply(mal_item, false);
+                                    // self.dataCollector.put(mal_ptr_param) catch unreachable;
 
                                     if (mal_ptr_param.* == .Incompleted) {
                                         return MalTypeError.IllegalType;
@@ -696,9 +738,18 @@ pub const LispEnv = struct {
                                         params_items,
                                     });
 
-                                    const numberValue = value.as_number() catch unreachable;
+                                    // data_ptr support returning number and boolean case
+                                    switch (value) {
+                                        .number => {
+                                            const numberValue = value.as_number() catch unreachable;
 
-                                    fnValue = MalType.new_number(env.allocator, numberValue.value);
+                                            fnValue = MalType.new_number(env.allocator, numberValue.value);
+                                        },
+                                        .boolean => |boolean| {
+                                            fnValue = MalType.new_boolean_ptr(boolean);
+                                        },
+                                        else => {},
+                                    }
                                 },
                                 // NOTE: This should be disabled in ptr version
                                 .with_env => |env_func| {
