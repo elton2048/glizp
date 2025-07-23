@@ -358,3 +358,22 @@ test "emptyp function - falsy case" {
     const result = printer.pr_str(emptyp_statement_value, true);
     try testing.expectEqualStrings("nil", result);
 }
+
+test "count function" {
+    // if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var count_statement = Reader.init(allocator, "(count (list 1 2 \"1\"))");
+    defer count_statement.deinit();
+
+    try testing.expect(count_statement.ast_root.* == .list);
+
+    const count_statement_value = try env.apply(count_statement.ast_root, false);
+    defer count_statement_value.deinit();
+
+    const result = printer.pr_str(count_statement_value, true);
+    try testing.expectEqualStrings("3", result);
+}

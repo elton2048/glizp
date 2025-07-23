@@ -59,6 +59,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).i
     .{ "list", &listFunc },
     .{ "listp", &isListFunc },
     .{ "emptyp", &isEmptyFunc },
+    .{ "count", &countFunc },
 
     .{ "vector", &vectorFunc },
     .{ "aref", &arefFunc },
@@ -214,6 +215,26 @@ fn isEmptyFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
         const empty = list.items.len == 0;
 
         return MalType.new_boolean_ptr(empty);
+    }
+
+    return MalType.new_boolean_ptr(false);
+}
+
+fn countFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    const isList = try (try isListFunc(params, env)).as_boolean();
+
+    if (isList) {
+        const mal = get(params, env) catch |err| switch (err) {
+            error.IllegalType => blk: {
+                break :blk params[0];
+            },
+            else => {
+                return err;
+            },
+        };
+
+        const list = try mal.as_list();
+        return MalType.new_number(env.allocator, @floatFromInt(list.items.len));
     }
 
     return MalType.new_boolean_ptr(false);
