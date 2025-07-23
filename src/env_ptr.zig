@@ -62,6 +62,7 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).i
     .{ "count", &countFunc },
 
     .{ "vector", &vectorFunc },
+    .{ "vectorp", &isVectorFunc },
     .{ "aref", &arefFunc },
 
     // NOTE: lread.c in original Emacs
@@ -71,12 +72,14 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).i
     .{ "load", &loadFunc },
 });
 
-fn set(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+fn baseSetFunc(params: []*MalType, env: *LispEnv, increase_count: bool) MalTypeError!*MalType {
     std.debug.assert(params.len == 2);
 
     const key = try params[0].as_symbol();
     const eval_value = params[1];
-    eval_value.incref();
+    if (increase_count) {
+        eval_value.incref();
+    }
     const value = env.apply(eval_value, false) catch |err| switch (err) {
         error.IllegalType => return MalTypeError.IllegalType,
         error.Unhandled => return MalTypeError.Unhandled,
@@ -88,6 +91,10 @@ fn set(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     };
 
     return value;
+}
+
+fn set(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    return baseSetFunc(params, env, true);
 }
 
 fn get(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
@@ -116,7 +123,7 @@ fn letX(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
         // NOTE: Using list for binding
         const list = try binding.as_list_ptr();
 
-        _ = try set(list.items, newEnv);
+        _ = try baseSetFunc(list.items, newEnv, false);
     }
 
     return newEnv.apply(eval_arg, false);
@@ -159,6 +166,16 @@ fn ifFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
 
 fn listLikeFunc(params: *MalType) MalTypeError!*MalType {
     if (params.as_list()) |_| {
+        return MalType.new_boolean_ptr(true);
+    } else |_| {
+        return MalType.new_boolean_ptr(false);
+    }
+
+    return MalType.new_boolean_ptr(false);
+}
+
+fn vectorLikeFunc(params: *MalType) MalTypeError!*MalType {
+    if (params.as_vector()) |_| {
         return MalType.new_boolean_ptr(true);
     } else |_| {
         return MalType.new_boolean_ptr(false);
@@ -243,13 +260,31 @@ fn countFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
 fn vectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     var vector: lisp.List = .empty;
 
-    vector.insertSlice(env.allocator, 0, params) catch |err| switch (err) {
-        error.OutOfMemory => return MalTypeError.IllegalType,
-    };
+    for (params) |param| {
+        const mal_param = param;
+        mal_param.incref();
+        utils.log("vectorFunc", "{*}; {any}", .{ mal_param, mal_param }, .{ .color = .Green });
+        vector.append(env.allocator, mal_param) catch @panic("test");
+    }
 
     const mal = MalType.new_vector_ptr(env.allocator, vector);
 
     return mal;
+}
+
+fn isVectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    // TODO: return better error.
+    std.debug.assert(params.len == 1);
+
+    const result = get(params, env) catch |err| switch (err) {
+        error.IllegalType => blk: {
+            break :blk params[0];
+        },
+        else => {
+            return err;
+        },
+    };
+    return vectorLikeFunc(result);
 }
 
 fn arefFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
@@ -645,6 +680,9 @@ pub const LispEnv = struct {
                             utils.log("ptr_params", "{any}", .{item}, .{ .color = .BrightWhite, .test_only = true });
                             switch (item.*) {
                                 .list => {
+                                    self.dataCollector.put(item) catch unreachable;
+                                },
+                                .vector => {
                                     self.dataCollector.put(item) catch unreachable;
                                 },
                                 else => {},

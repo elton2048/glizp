@@ -332,7 +332,7 @@ pub const MalType = union(enum) {
             },
             .vector => |*vector| {
                 for (vector.data.items) |item| {
-                    item.deinit();
+                    item.decref();
                 }
                 vector.data.deinit(vector.allocator);
 
