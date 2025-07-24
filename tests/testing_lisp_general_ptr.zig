@@ -191,6 +191,82 @@ test "if function - non-boolean case" {
     try testing.expectEqualStrings("2", result);
 }
 
+// NOTE: Need manual deinit previously as it the lambda function
+// does not resolve at all.
+// This makes the program has the potential leakage issue as
+// the interrupter may store the function lisp value but never
+// free.
+// This is due to the ast_root is in list type, in that layer
+// the lambda is not evaled but after the apply function, which
+// makes the normal deinit function does not free the function lisp value.
+// Current implementation checks if the lambda function run and
+// defer deinit process.
+//
+// Using wrap to call lambda function shall consider one of the
+// special case now as it breaks the normal rule to eval list.
+// In Emacs using funcall to supply params is a more standard way
+// in lisp semantic.
+// i.e. (funcall (lambda (a b) (+ 1 a b)) a b)
+//       ^       ^----------------------^ ^ ^
+//  function call   The function part      params
+//              vv----------------------v v v
+// Current case ((lambda (a b) (+ 1 a b)) a b)
+test "lambda function - non-executed case" {
+    // if (true) return error.SkipZigTest;
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var lambda_statement = Reader.init(allocator, "(lambda (a) (+ 1 a))");
+    defer lambda_statement.deinit();
+
+    try testing.expect(lambda_statement.ast_root.* == .list);
+
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
+    defer lambda_statement_value.decref();
+    try testing.expect(lambda_statement_value.* == .function);
+
+    const result = printer.pr_str(lambda_statement_value, true);
+    try testing.expectEqualStrings("#<function>", result);
+}
+
+test "lambda function - simple case - single variable" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var lambda_statement = Reader.init(allocator, "((lambda (a) (+ 1 a)) 2)");
+    defer lambda_statement.deinit();
+
+    try testing.expect(lambda_statement.ast_root.* == .list);
+
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
+    defer lambda_statement_value.decref();
+
+    const result = printer.pr_str(lambda_statement_value, true);
+    try testing.expectEqualStrings("3", result);
+}
+
+test "lambda function - simple case - multiple variables" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var lambda_statement = Reader.init(allocator, "((lambda (a b) (+ 1 a b)) 2 3)");
+    defer lambda_statement.deinit();
+
+    try testing.expect(lambda_statement.ast_root.* == .list);
+
+    const lambda_statement_value = try env.apply(lambda_statement.ast_root, false);
+    defer lambda_statement_value.decref();
+
+    const result = printer.pr_str(lambda_statement_value, true);
+    try testing.expectEqualStrings("6", result);
+}
+
 test "list function - simple case" {
     // if (true) return error.SkipZigTest;
     const allocator = testing.allocator;
