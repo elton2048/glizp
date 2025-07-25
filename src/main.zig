@@ -19,6 +19,7 @@ const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 
 const LispEnv = @import("env.zig").LispEnv;
+const LispEnvPtr = @import("env_ptr.zig").LispEnv;
 
 const Frontend = @import("Frontend.zig");
 const Terminal = @import("terminal.zig").Terminal;
@@ -138,7 +139,7 @@ pub const Shell = struct {
     /// Frontend of the shell
     frontend: Frontend,
     /// Lisp environment of the shell,
-    env: *LispEnv,
+    env: *LispEnvPtr,
 
     // As (logz) logger is not thread-safe, using a pool for the use
     // of the logger.
@@ -210,13 +211,13 @@ pub const Shell = struct {
 
         const frontend = terminal.frontend();
 
-        const env = LispEnv.init_root(allocator);
+        const env = LispEnvPtr.init_root(allocator);
 
-        const plugin_example = PluginExample.init(allocator);
-        env.*.registerPlugin(plugin_example) catch @panic("OOM");
+        // const plugin_example = PluginExample.init(allocator);
+        // env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
-        const plugin_history = PluginHistory.init(allocator);
-        env.*.registerPlugin(plugin_history) catch @panic("OOM");
+        // const plugin_history = PluginHistory.init(allocator);
+        // env.*.registerPlugin(plugin_history) catch @panic("OOM");
 
         const plugin_editing = PluginEditing.init(allocator, frontend);
         env.*.registerPlugin(plugin_editing) catch @panic("OOM");
@@ -236,7 +237,7 @@ pub const Shell = struct {
             .env = env,
         };
 
-        self.loadInitConfigFile() catch @panic("Unexpected error");
+        // self.loadInitConfigFile() catch @panic("Unexpected error");
 
         self.initConfig();
 
@@ -528,12 +529,13 @@ pub const Shell = struct {
         return statement;
     }
 
-    fn eval(self: *Shell, item: MalType) !void {
+    fn eval(self: *Shell, item: *MalType) !void {
         const fnValue = self.env.apply(item, false) catch |err| switch (err) {
             // Silently suppress the error
             MalTypeError.IllegalType => return,
             else => return err,
         };
+        utils.log("eval", "{*}; {any}", .{ fnValue, fnValue }, .{ .test_only = true });
         try self.frontend.print(printer.pr_str(fnValue, true));
         try self.frontend.print("\n");
     }
