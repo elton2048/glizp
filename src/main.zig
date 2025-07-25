@@ -13,7 +13,7 @@ const printer = @import("printer.zig");
 const data = @import("data.zig");
 const lisp = @import("types/lisp.zig");
 
-const ArrayList = std.ArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 const Reader = token_reader.Reader;
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
@@ -163,10 +163,10 @@ pub const Shell = struct {
         };
         const dt_now = now.time();
 
-        var date_al = ArrayList(u8).init(allocator);
-        defer date_al.deinit();
+        var date_al: ArrayList(u8) = .empty;
+        defer date_al.deinit(allocator);
 
-        dt_now.strftime(date_al.writer(), "%Y-%m-%d") catch |err| switch (err) {
+        dt_now.strftime(date_al.writer(allocator), "%Y-%m-%d") catch |err| switch (err) {
             error.InvalidFormat => @panic("InvalidFormat"),
             error.Overflow => @panic("Year overflow"),
             error.UnsupportedSpecifier => @panic("Unexpected UnsupportedSpecifier error, check the original library"),
@@ -216,8 +216,8 @@ pub const Shell = struct {
         // const plugin_example = PluginExample.init(allocator);
         // env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
-        // const plugin_history = PluginHistory.init(allocator);
-        // env.*.registerPlugin(plugin_history) catch @panic("OOM");
+        const plugin_history = PluginHistory.init(allocator);
+        env.*.registerPlugin(plugin_history) catch @panic("OOM");
 
         const plugin_editing = PluginEditing.init(allocator, frontend);
         env.*.registerPlugin(plugin_editing) catch @panic("OOM");
@@ -336,7 +336,6 @@ pub const Shell = struct {
 
     // read from stdin and store the result via provided allocator.
     fn read(self: *Shell, allocator: std.mem.Allocator) ![]const u8 {
-        _ = allocator;
         // NOTE: The reading from stdin is now having two writer for different
         // ends. One is for stdout to display; Another is Arraylist to store
         // the string. Is this a good way to handle?
@@ -384,9 +383,9 @@ pub const Shell = struct {
                         }
                         // New entry point
                         if (inputEvent.ctrl and key == .J) {
-                            var copied_statement = try plugin_full_statement.clone();
-                            defer copied_statement.deinit();
-                            statement = try copied_statement.toOwnedSlice();
+                            var copied_statement = try plugin_full_statement.clone(allocator);
+                            defer copied_statement.deinit(allocator);
+                            statement = try copied_statement.toOwnedSlice(allocator);
 
                             // TODO: Shift-RET case is not handled yet. It returns same byte
                             // as only RET case, which needs to refer to io part.
@@ -407,7 +406,7 @@ pub const Shell = struct {
                             }
 
                             if (history_plugin) |plugin| {
-                                try plugin.history.append(statement);
+                                try plugin.history.append(self.env.allocator, statement);
                                 // Reset history
                                 plugin.history_curr = plugin.history.items.len - 1;
                             }

@@ -1,4 +1,4 @@
-const ArrayList = @import("std").ArrayList;
+const ArrayList = @import("std").ArrayListUnmanaged;
 /// Frontend interface to control the display behaviour.
 const int_ptr = *const anyopaque;
 

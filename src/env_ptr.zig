@@ -6,7 +6,7 @@ const logz = @import("logz");
 
 const xev = @import("xev");
 
-const ArrayList = std.ArrayList;
+const ArrayList = std.ArrayListUnmanaged;
 
 const data = @import("data_ptr.zig");
 const utils = @import("utils.zig");
@@ -166,13 +166,13 @@ fn listLikeFunc(params: *MalType) MalTypeError!*MalType {
 }
 
 fn listFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
-    var list = ArrayList(*MalType).init(env.allocator);
+    var list: lisp.List = .empty;
 
     for (params) |param| {
         const mal_param = param;
         mal_param.incref();
         utils.log("listFunc", "{*}; {any}", .{ mal_param, mal_param }, .{ .color = .Green });
-        list.append(mal_param) catch @panic("test");
+        list.append(env.allocator, mal_param) catch @panic("test");
     }
 
     const mal = MalType.new_list_ptr(env.allocator, list);
@@ -196,9 +196,9 @@ fn isListFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
 }
 
 fn vectorFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
-    var vector = ArrayList(*MalType).init(env.allocator);
+    var vector: lisp.List = .empty;
 
-    vector.insertSlice(0, params) catch |err| switch (err) {
+    vector.insertSlice(env.allocator, 0, params) catch |err| switch (err) {
         error.OutOfMemory => return MalTypeError.IllegalType,
     };
 
@@ -239,7 +239,7 @@ fn fsLoadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
         else => return MalTypeError.Unhandled,
     };
 
-    const al_result = ArrayList(u8).fromOwnedSlice(env.allocator, result);
+    const al_result = ArrayList(u8).fromOwnedSlice(result);
 
     const mal_ptr = env.allocator.create(MalType) catch @panic("OOM");
     mal_ptr.* = MalType.new_string(al_result);
@@ -259,7 +259,7 @@ fn loadFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     // getting key "a" returns no value.
     const file_content = try fsLoadFunc(params, env);
 
-    env.internalData.append(file_content) catch |err| switch (err) {
+    env.internalData.append(env.allocator, file_content) catch |err| switch (err) {
         // TODO: Meaningful error for such case
         error.OutOfMemory => return MalTypeError.Unhandled,
     };
@@ -368,7 +368,7 @@ pub const LispEnv = struct {
             fnTable.put(entry.key_ptr.*, entry.value_ptr.*) catch @panic("OOM");
         }
 
-        const internalData = ArrayList(*MalType).init(allocator);
+        const internalData: ArrayList(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
@@ -406,7 +406,7 @@ pub const LispEnv = struct {
     /// TODO - Way to check if the plugin fulfills some requirement?
     pub fn registerPlugin(self: *Self, extension: anytype) !void {
         // TODO: Any way to check the extension fulfilling the requirement?
-        const plugin = Plugin.init(extension, &self.data, self.messageQueue);
+        const plugin = Plugin.init(extension, self.allocator, &self.data, self.messageQueue);
 
         logz.info()
             .fmt("[LISP_ENV]", "Plugin name: '{s}' registered.", .{plugin.name})
@@ -453,7 +453,7 @@ pub const LispEnv = struct {
         for (self.internalData.items) |item| {
             item.deinit();
         }
-        self.internalData.deinit();
+        self.internalData.deinit(self.allocator);
         var iter = self.dataCollector.iterator();
         while (iter.next()) |item| {
             // Only free those with implicit keys. i.e. not created from user
@@ -485,7 +485,7 @@ pub const LispEnv = struct {
         readFromFnMap(LispFunctionPtrWithEnv, fnTable, SPECIAL_ENV_EVAL_TABLE, STOCK_REFERENCE);
         // readFromFnMap(LispFunctionWithTail, fnTable, SPECIAL_ENV_WITH_TAIL_EVAL_TABLE, STOCK_REFERENCE);
 
-        const internalData = ArrayList(*MalType).init(allocator);
+        const internalData: ArrayList(*MalType) = .empty;
 
         const dataCollector = PrefixStringHashMap(*MalType).init(allocator, dataCollectorKeyPrefix);
 
@@ -585,7 +585,7 @@ pub const LispEnv = struct {
                     const lambda_func_run_checker: bool = true;
                     const allocator = self.allocator;
 
-                    var ptr_params = ArrayList(*MalType).init(allocator);
+                    var ptr_params: ArrayList(*MalType) = .empty;
                     defer {
                         logz.info()
                             .fmt("[apply] deinit", "", .{})
@@ -606,7 +606,7 @@ pub const LispEnv = struct {
                             }
                         }
                         // ---------------
-                        ptr_params.deinit();
+                        ptr_params.deinit(allocator);
                     }
 
                     for (list.data.items, 0..) |mal_item, i| {
@@ -704,7 +704,7 @@ pub const LispEnv = struct {
                             }
                         }
 
-                        ptr_params.append(mal_ptr_param) catch |err| switch (err) {
+                        ptr_params.append(allocator, mal_ptr_param) catch |err| switch (err) {
                             error.OutOfMemory => return MalTypeError.Unhandled,
                         };
                     }
@@ -803,9 +803,15 @@ pub const LispEnv = struct {
                                         params_items,
                                         plugin,
                                     });
+                                    // Put the item into data collector for garbage collection
+                                    // TODO: Is there anyway to check in test case?
+                                    self.dataCollector.put(fnValue) catch |err| switch (err) {
+                                        else => return MalTypeError.Unhandled,
+                                    };
                                 },
                             }
 
+                            // NOTE: The flow is not used now.
                             if (!lambda_func_run_checker) {
                                 // NOTE: lambda function is not yet handled.
                                 // Put the item into data collector for garbage collection

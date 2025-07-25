@@ -8,6 +8,7 @@ const lisp = @import("types/lisp.zig");
 
 const Frontend = @import("Frontend.zig");
 
+const ArrayList = std.ArrayListUnmanaged;
 const MalType = lisp.MalType;
 const MalTypeError = lisp.MalTypeError;
 const LispFunctionWithOpaque = lisp.LispFunctionWithOpaque;
@@ -168,21 +169,23 @@ pub const PluginEditing = struct {
     /// Frontend interface
     frontend: Frontend,
 
+    allocator: std.mem.Allocator,
     /// Using buffer as a whole for such feature in future, currently
     /// it is a single local one.
-    buffer: std.ArrayList(u8),
+    buffer: ArrayList(u8),
     /// Denotes the cursor position corresponds to the buffer
     pos: usize,
 
     pub fn init(allocator: std.mem.Allocator, frontend: Frontend) *PluginEditing {
         const self = allocator.create(PluginEditing) catch @panic("OOM");
 
-        const buffer = std.ArrayList(u8).init(allocator);
-        defer buffer.deinit();
+        var buffer: ArrayList(u8) = .empty;
+        defer buffer.deinit(allocator);
 
         self.* = .{
             ._fnTable = EVAL_TABLE,
             .frontend = frontend,
+            .allocator = allocator,
             .buffer = buffer,
             .pos = 0,
         };
@@ -191,13 +194,13 @@ pub const PluginEditing = struct {
     }
 
     pub fn insert(self: *PluginEditing, pos: usize, byte: u8) !void {
-        const result = try self.buffer.insert(pos, byte);
+        const result = try self.buffer.insert(self.allocator, pos, byte);
 
         return result;
     }
 
     pub fn append(self: *PluginEditing, byte: u8) !void {
-        return try self.buffer.append(byte);
+        return try self.buffer.append(self.allocator, byte);
     }
 
     pub fn reset(self: *PluginEditing) void {
