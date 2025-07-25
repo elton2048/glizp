@@ -103,7 +103,7 @@ pub const VectorData = struct {
 };
 
 pub const FunctionData = struct {
-    // allocator: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     data: *LispEnv,
     reference_count: ReferenceCountType = 1,
 };
@@ -120,14 +120,14 @@ pub const MalType = union(enum) {
     /// General symbol type including function keyword
     symbol: SymbolData,
 
-    function: *LispEnv,
+    function: FunctionData,
 
     SExprEnd,
     VectorExprEnd,
     /// Incompleted type from parser
     Incompleted: void,
     /// Undefined param for function
-    Undefined,
+    Undefined: void,
 
     pub fn format(self: MalType, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = options;
@@ -181,6 +181,7 @@ pub const MalType = union(enum) {
                     }
                 },
                 .vector => |vector| {
+                    try std.fmt.format(writer, "count: {d}", .{vector.reference_count});
                     try std.fmt.format(writer, ".vector: ", .{});
                     for (vector.data.items, 0..) |item, i| {
                         try writer.writeAll("{ ");
@@ -188,18 +189,21 @@ pub const MalType = union(enum) {
                         try writer.writeAll(" }");
                     }
                 },
+                .function => |func| {
+                    try std.fmt.format(writer, "count: {d}", .{func.reference_count});
+                    try std.fmt.format(writer, ".function: ", .{});
+                    try std.fmt.format(writer, "{any}", .{func.data});
+                },
                 // NOTE: This is no way to use default format now as
                 // the implementation checks if the struct has "format"
                 // method or not for custom formatting
-                else => {
-                    try std.fmt.format(writer, "{any!}", .{self});
-                },
             }
             try writer.writeAll("}");
         }
     }
 
     pub const INCOMPLETED = @constCast(&MalType{ .Incompleted = undefined });
+    pub const UNDEFINED = @constCast(&MalType{ .Undefined = undefined });
     pub const TRUE = @constCast(&MalType{ .boolean = true });
     pub const FALSE = @constCast(&MalType{ .boolean = false });
 
@@ -301,6 +305,20 @@ pub const MalType = union(enum) {
         return mal_ptr;
     }
 
+    pub fn new_function_ptr(data: *LispEnv) *MalType {
+        const allocator = data.allocator;
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = .{
+            .function = .{
+                .allocator = allocator,
+                .data = data,
+            },
+        };
+
+        return mal_ptr;
+    }
+
     pub fn deinit(self: *MalType) void {
         utils.log("DEINIT entry", "{*}; {any}", .{ self, self }, .{ .test_only = true });
 
@@ -332,17 +350,18 @@ pub const MalType = union(enum) {
             },
             .vector => |*vector| {
                 for (vector.data.items) |item| {
-                    item.deinit();
+                    item.decref();
                 }
                 vector.data.deinit(vector.allocator);
 
                 vector.allocator.destroy(self);
             },
-            // NOTE: Using the root env to deinit, but it seems a bit
-            // magical?
-            // .function => |func_with_env| {
-            //     func_with_env.deinit();
-            // },
+            .function => |func| {
+                // NOTE: Except lambda cases, All env are deinit through root env.
+                func.data.deinit();
+
+                func.allocator.destroy(self);
+            },
             else => {},
         }
     }
@@ -482,6 +501,15 @@ pub const MalType = union(enum) {
         }
     }
 
+    pub fn as_function_ptr(self: *MalType) MalTypeError!*LispEnv {
+        switch (self.*) {
+            .function => |func| {
+                return func.data;
+            },
+            else => return MalTypeError.IllegalType,
+        }
+    }
+
     /// Increase reference count for a lisp object.
     pub fn incref(self: *MalType) void {
         // A procedure instead of a function returning its argument
@@ -494,6 +522,7 @@ pub const MalType = union(enum) {
             .number,       => |*l| l.reference_count += 1,
             .string        => |*l| l.reference_count += 1,
             .symbol              => |*l| l.reference_count += 1,
+            .function      => |*l| l.reference_count += 1,
             else => {},
             // .fncore                    => |*l| l.reference_count += 1,
             // .func                      => |*l| l.reference_count += 1,
@@ -553,6 +582,14 @@ pub const MalType = union(enum) {
 
                 l.reference_count -= 1;
                 if (l.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .function => |*func| {
+                if (func.reference_count == 0) return;
+
+                func.reference_count -= 1;
+                if (func.reference_count == 0) {
                     self.deinit();
                 }
             },
