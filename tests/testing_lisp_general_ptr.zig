@@ -613,3 +613,35 @@ test "aref function - get from variable" {
     const result = printer.pr_str(aref_statement_value, true);
     try testing.expectEqualStrings("2", result);
 }
+
+test "pr-str function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var pr_str_statement = Reader.init(allocator, "(pr-str \"\\\"\")");
+    defer pr_str_statement.deinit();
+
+    const pr_str_statement_value = try env.apply(pr_str_statement.ast_root, false);
+    defer pr_str_statement_value.decref();
+
+    const result = printer.pr_str(pr_str_statement_value, true);
+    try testing.expectEqualStrings("\"\\\"\\\\\\\"\\\"\"", result);
+}
+
+test "str function" {
+    const allocator = testing.allocator;
+
+    const env = LispEnv.init_root(allocator);
+    defer env.deinit();
+
+    var str_statement = Reader.init(allocator, "(str \"\\\"\")");
+    defer str_statement.deinit();
+
+    const str_statement_value = try env.apply(str_statement.ast_root, false);
+    defer str_statement_value.decref();
+
+    const result = printer.pr_str(str_statement_value, true);
+    try testing.expectEqualStrings("\"\\\"\"", result);
+}
