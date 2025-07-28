@@ -11,6 +11,7 @@ const ArrayList = std.ArrayListUnmanaged;
 const data = @import("data_ptr.zig");
 const utils = @import("utils.zig");
 const fs = @import("fs.zig");
+const printer = @import("printer.zig");
 const Reader = @import("reader.zig").Reader;
 
 const lisp = @import("types/lisp.zig");
@@ -66,6 +67,9 @@ pub const SPECIAL_ENV_EVAL_TABLE = std.StaticStringMap(LispFunctionPtrWithEnv).i
     .{ "vectorp", &isVectorFunc },
     .{ "aref", &arefFunc },
 
+    .{ "pr-str", &prStrFunc },
+    .{ "str", &strFunc },
+
     // NOTE: lread.c in original Emacs
     // Original "load" function includes to read and execute a file of Lisp code
     // Whereas this just loads the content
@@ -94,14 +98,94 @@ fn baseSetFunc(params: []*MalType, env: *LispEnv, increase_count: bool) MalTypeE
     return value;
 }
 
+/// Helper function to resolve lisp to primitive value
+fn resolveSymbol(mal: *MalType, env: *LispEnv) MalTypeError!*MalType {
+    switch (mal.*) {
+        .number, .string, .boolean, .list => {
+            return mal;
+        },
+
+        .symbol => |symbol| {
+            return env.getVar(symbol.data);
+        },
+
+        else => return MalTypeError.IllegalType,
+    }
+
+    return MalType.new_boolean_ptr(false);
+}
+
+/// Options for string printing function.
+pub const StrPrintOption = struct {
+    /// Whether the string are translated into their printed representations.
+    print_readably: bool = false,
+    /// Whether the params are joined with space.
+    join_with_space: bool = false,
+};
+
+/// Generic way for printing string function in mal layer
+/// NOTE: For join params part, consider in printer layer
+pub fn strPrintImpl(
+    allocator: std.mem.Allocator,
+    params: []*MalType,
+    option: StrPrintOption,
+) MalTypeError!*MalType {
+    // TODO: deinit consideration
+    var temp_al: ArrayList(u8) = .empty;
+
+    for (params, 0..) |param, i| {
+        const result = printer.pr_str(param, option.print_readably);
+
+        temp_al.appendSlice(allocator, result) catch |err| switch (err) {
+            else => return MalTypeError.Unhandled,
+        };
+
+        // NOTE: Lazy way to join the params with " "; Consider do this in
+        // printer layer
+        if (option.join_with_space) {
+            if (i < params.len - 1) {
+                temp_al.append(allocator, ' ') catch |err| switch (err) {
+                    else => return MalTypeError.Unhandled,
+                };
+            }
+        }
+    }
+
+    return MalType.new_string_ptr(allocator, temp_al);
+}
+
+fn prStrFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    return strPrintImpl(env.allocator, params, .{
+        .join_with_space = true,
+        .print_readably = true,
+    });
+}
+
+fn strFunc(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
+    const allocator = env.allocator;
+
+    var resolved_params_al: ArrayList(*MalType) = .empty;
+    defer resolved_params_al.deinit(allocator);
+
+    for (params) |param| {
+        const resolved_param = try resolveSymbol(param, env);
+
+        // TODO: Error handling
+        resolved_params_al.append(allocator, resolved_param) catch unreachable;
+    }
+
+    return strPrintImpl(allocator, resolved_params_al.items, .{
+        .join_with_space = false,
+        .print_readably = false,
+    });
+}
+
 fn set(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
     return baseSetFunc(params, env, true);
 }
 
 fn get(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
-    const key = try params[0].as_symbol();
-
-    return env.getVar(key);
+    return resolveSymbol(params[0], env);
 }
 
 fn letX(params: []*MalType, env: *LispEnv) MalTypeError!*MalType {
