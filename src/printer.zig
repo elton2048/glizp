@@ -66,13 +66,11 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
                 }
 
                 if (char == '\\') {
-                    if (iter.peek()) |peek| {
-                        if (peek == '\\') {
-                            if (print_readably) {
-                                string.append(allocator, '\\') catch @panic("allocator error");
-                            } else {
-                                // TODO: Handle non print_readably case
-                            }
+                    if (iter.peek()) |_| {
+                        if (print_readably) {
+                            string.append(allocator, '\\') catch @panic("allocator error");
+                        } else {
+                            // TODO: Handle non print_readably case
                         }
                     } else {
                         // NOTE: For single "\" case in data
