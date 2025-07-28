@@ -90,13 +90,13 @@ pub fn pr_str(mal: *MalType, print_readably: bool) []u8 {
         },
         .list => |list| {
             string.appendSlice(allocator, "(") catch @panic("allocator error");
-            for (list.data.items) |item| {
+            for (list.data.items, 1..) |item, index| {
                 const result = pr_str(item, print_readably);
                 string.appendSlice(allocator, result) catch @panic("allocator error");
-                string.appendSlice(allocator, " ") catch @panic("allocator error");
+                if (index != list.data.items.len) {
+                    string.appendSlice(allocator, " ") catch @panic("allocator error");
+                }
             }
-            // Remove the last space
-            _ = string.pop();
             string.appendSlice(allocator, ")") catch @panic("allocator error");
         },
         .function => |_| {
