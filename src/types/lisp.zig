@@ -172,21 +172,25 @@ pub const MalType = union(enum) {
                     // TODO: Need level control, limit or better formatting?
                     try std.fmt.format(writer, "count: {d}", .{list.reference_count});
                     try std.fmt.format(writer, ".list: ", .{});
-                    for (list.data.items, 0..) |item, i| {
-                        try writer.writeAll("{ ");
-                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
-                        try writer.writeAll(" }");
+                    if (list.reference_count > 0) {
+                        for (list.data.items, 0..) |item, i| {
+                            try writer.writeAll("{ ");
+                            try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                            try writer.writeAll(" }");
 
-                        try std.fmt.format(writer, "pointer: {*}", .{item});
+                            try std.fmt.format(writer, "pointer: {*}", .{item});
+                        }
                     }
                 },
                 .vector => |vector| {
                     try std.fmt.format(writer, "count: {d}", .{vector.reference_count});
                     try std.fmt.format(writer, ".vector: ", .{});
-                    for (vector.data.items, 0..) |item, i| {
-                        try writer.writeAll("{ ");
-                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
-                        try writer.writeAll(" }");
+                    if (vector.reference_count > 0) {
+                        for (vector.data.items, 0..) |item, i| {
+                            try writer.writeAll("{ ");
+                            try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                            try writer.writeAll(" }");
+                        }
                     }
                 },
                 .function => |func| {
@@ -350,6 +354,8 @@ pub const MalType = union(enum) {
             },
             .vector => |*vector| {
                 for (vector.data.items) |item| {
+                    utils.log("deinit vector", "{any}", .{item}, .{ .enable = false });
+
                     item.decref();
                 }
                 vector.data.deinit(vector.allocator);
@@ -383,11 +389,13 @@ pub const MalType = union(enum) {
     /// should also be copied into designated allocator.
     /// Not being used. Consider remove this.
     pub fn copy(self: *MalType, allocator: std.mem.Allocator) *MalType {
-        utils.log("lisp", "COPY", .{}, .{});
-        // const new_object = allocator.create(MalType) catch @panic("OOM");
+        utils.log("lisp", "COPY", .{}, .{ .test_only = true });
 
         var new_object: *MalType = undefined;
         switch (self.*) {
+            .symbol => |symbol| {
+                new_object = MalType.new_symbol(allocator, symbol.data);
+            },
             .string => |string| {
                 const new_data = string.data.clone(allocator) catch @panic("");
 
@@ -401,10 +409,34 @@ pub const MalType = union(enum) {
                     .reference_count = number.reference_count,
                 } };
             },
+            .list => |list| {
+                var copied_list: List = .empty;
+                for (list.data.items) |item| {
+                    const copied_item = item.copy(allocator);
+
+                    copied_list.append(allocator, copied_item) catch unreachable;
+                }
+
+                new_object = MalType.new_list_ptr(allocator, copied_list);
+            },
+            .vector => |vector| {
+                var copied_vector: List = .empty;
+                for (vector.data.items) |item| {
+                    const copied_item = item.copy(allocator);
+
+                    copied_vector.append(allocator, copied_item) catch unreachable;
+                }
+
+                new_object = MalType.new_vector_ptr(allocator, copied_vector);
+            },
+            .boolean => |boolean| {
+                new_object = MalType.new_boolean_ptr(boolean);
+            },
             else => {
                 new_object = allocator.create(MalType) catch @panic("OOM");
                 new_object.* = self.*;
-                // @panic("Not yet implemented");
+                utils.log("COPY", "{any}", .{self}, .{});
+                @panic("Not yet implemented");
             },
         }
 
