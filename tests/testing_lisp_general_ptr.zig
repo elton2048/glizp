@@ -191,3 +191,21 @@ test "pr-str function" {
 test "str function" {
     try testLispFn("(str \"\\\"\")", "\"\\\"\"");
 }
+
+test "read-string function" {
+    try testLispFn("(read-string \"(1 2 (3 4) nil)\")", "(1 2 (3 4) nil)");
+
+    try testLispFn("(read-string \"(+ 2 3)\")", "(+ 2 3)");
+
+    try testLispFn("(read-string \"\\\"\n\\\"\")", "\"\\n\"");
+}
+
+test "eval function" {
+    try testLispFn("(eval (read-string \"(+ 2 3)\"))", "5");
+}
+
+test "slurp function" {
+    try testLispFn("(slurp \"./tests/sample/test_load.lisp\")",
+        \\"(def! a 1)\na\n"
+    );
+}
