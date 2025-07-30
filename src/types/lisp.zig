@@ -108,6 +108,18 @@ pub const FunctionData = struct {
     reference_count: ReferenceCountType = 1,
 };
 
+/// Comment data is not supported, all related code in this file
+/// are not used.
+/// Comment does not exist in parsed AST, they are null value in parsing
+/// token given.
+pub const CommentData = struct {
+    allocator: std.mem.Allocator,
+    data: ArrayList(u8),
+    /// Denote which layer is the comment to have different style.
+    layer: u8 = 1,
+    reference_count: ReferenceCountType = 1,
+};
+
 pub const MalType = union(enum) {
     boolean: bool,
     number: NumberData,
@@ -121,6 +133,7 @@ pub const MalType = union(enum) {
     symbol: SymbolData,
 
     function: FunctionData,
+    comment: CommentData,
 
     SExprEnd,
     VectorExprEnd,
@@ -197,6 +210,11 @@ pub const MalType = union(enum) {
                     try std.fmt.format(writer, "count: {d}", .{func.reference_count});
                     try std.fmt.format(writer, ".function: ", .{});
                     try std.fmt.format(writer, "{any}", .{func.data});
+                },
+                .comment => |comment| {
+                    try std.fmt.format(writer, "count: {d}", .{comment.reference_count});
+                    try std.fmt.format(writer, ".comment: ", .{});
+                    try std.fmt.format(writer, "{s}", .{comment.data.items});
                 },
                 // NOTE: This is no way to use default format now as
                 // the implementation checks if the struct has "format"
@@ -323,6 +341,21 @@ pub const MalType = union(enum) {
         return mal_ptr;
     }
 
+    pub fn new_comment(allocator: std.mem.Allocator, data: ArrayList(u8)) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = .{
+            .comment = .{
+                .allocator = allocator,
+                // NOTE: Hardcoded for layer 1 now.
+                .layer = 1,
+                .data = data,
+            },
+        };
+
+        return mal_ptr;
+    }
+
     pub fn deinit(self: *MalType) void {
         utils.log("DEINIT entry", "{*}; {any}", .{ self, self }, .{ .test_only = true });
 
@@ -367,6 +400,13 @@ pub const MalType = union(enum) {
                 func.data.deinit();
 
                 func.allocator.destroy(self);
+            },
+            .comment => |*comment| {
+                const allocator = comment.allocator;
+
+                comment.data.deinit(allocator);
+
+                allocator.destroy(self);
             },
             else => {},
         }
@@ -622,6 +662,16 @@ pub const MalType = union(enum) {
 
                 func.reference_count -= 1;
                 if (func.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .comment => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
                     self.deinit();
                 }
             },

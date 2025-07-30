@@ -35,6 +35,8 @@ const SExprEnd = ')';
 const VectorExprStart = '[';
 const VectorExprEnd = ']';
 
+const CommentExpr = ';';
+
 fn isDigit(char: u8) bool {
     return char >= '0' and char <= '9';
 }
@@ -51,7 +53,7 @@ const LispEnv = @import("env.zig").LispEnv;
 
 // NOTE: Currently the regex requires fix to allow repeater after pipe('|')
 // char. Check isByteClass method in the library.
-const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\\\.|[^\\\\\"])*\"?|;.*|[^\\s\\[\\]\\{\\}('\"`,;)]*)";
+const MAL_REGEX = "[\\s,]*(~@|[\\[\\]\\{\\}\\(\\)'`~\\^@]|\"(?:\\\\.|[^\\\\\"])*\"?|;(.*)|[^\\s\\[\\]\\{\\}('\"`,;)]*)";
 
 /// Reader object
 pub const Reader = struct {
@@ -86,11 +88,15 @@ pub const Reader = struct {
 
         self.tokenize(statement);
 
-        const mal_root = self.read_form();
-        self.*.ast_root = mal_root;
+        if (self.read_form()) |mal_root| {
+            self.*.ast_root = mal_root;
+        } else {
+            // Fallback to nil for comment only case.
+            self.*.ast_root = MalType.FALSE;
+        }
 
         logz.info()
-            .fmt("[LOG]", "MAL head: {any}", .{mal_root})
+            .fmt("[LOG]", "MAL head: {any}", .{self.*.ast_root})
             .log();
 
         return self;
@@ -154,8 +160,10 @@ pub const Reader = struct {
         return token;
     }
 
-    pub fn read_form(self: *Reader) *MalType {
-        var mal_ptr: *MalType = undefined;
+    /// Read the subsequent lisp object.
+    /// For simplicity to support comment, return null for such case.
+    pub fn read_form(self: *Reader) ?*MalType {
+        var mal_ptr: ?*MalType = undefined;
 
         // Early return for empty case
         if (self.tokens.items.len == 0) {
@@ -168,7 +176,15 @@ pub const Reader = struct {
             // This should be changed for a better algo
             // "token" should be with length 1 only for this case.
             // See if assertion is required
-            if (char == SExprStart) {
+            if (char == CommentExpr) {
+                _ = self.read_comment() catch |err| {
+                    utils.log("comment err", "{any}", .{err}, .{});
+                };
+
+                // NOTE: Using null to have no result for comment now
+                // as a way to skip it.
+                mal_ptr = null;
+            } else if (char == SExprStart) {
                 const list = self.read_list() catch |err| switch (err) {
                     ReaderError.UnmatchedSExpr => {
                         logz.err()
@@ -186,9 +202,9 @@ pub const Reader = struct {
                 mal_ptr = MalType.new_list_ptr(self.allocator, list);
             } else if (char == SExprEnd) {
                 mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
-                mal_ptr.* = .SExprEnd;
+                mal_ptr.?.* = .SExprEnd;
 
-                defer self.allocator.destroy(mal_ptr);
+                defer self.allocator.destroy(mal_ptr.?);
             } else if (char == VectorExprStart) {
                 const list = self.read_vector() catch |err| switch (err) {
                     ReaderError.UnmatchedVectorExpr => {
@@ -206,9 +222,9 @@ pub const Reader = struct {
                 mal_ptr = MalType.new_list_ptr(self.allocator, list);
             } else if (char == VectorExprEnd) {
                 mal_ptr = self.allocator.create(MalType) catch @panic("OOM");
-                mal_ptr.* = .VectorExprEnd;
+                mal_ptr.?.* = .VectorExprEnd;
 
-                defer self.allocator.destroy(mal_ptr);
+                defer self.allocator.destroy(mal_ptr.?);
             } else {
                 mal_ptr = self.read_atom(token);
             }
@@ -220,6 +236,33 @@ pub const Reader = struct {
             .log();
 
         return mal_ptr;
+    }
+
+    /// Read comment based on comment syntax.
+    /// Currently it has no usage except for logging purpose as comment
+    /// is not stored in AST.
+    /// NOTE: There could be a way to include comment in the lisp
+    /// AST, however it will make reading function more
+    /// complicated. Some sidecar way is better to include
+    /// comment in the tree, yet this may require changing
+    /// the underlying data structure.
+    /// Also the regex does not pparse comment well, the non-capturing
+    /// group way is not working for comment syntax.
+    pub fn read_comment(self: *Reader) !ArrayList(u8) {
+        const list: ArrayList(u8) = .empty;
+
+        _ = self;
+        // while (self.next()) |token| {
+        //     utils.log("read_comment", "{s}", .{token}, .{ .enable = false });
+        //     if (std.mem.startsWith(u8, token, &[_]u8{CommentExpr})) {
+        //         self.token_curr -= 1;
+        //         break;
+        //     }
+        // } else |err| {
+        //     utils.log("read_comment err", "{any}", .{err}, .{ .color = .BrightRed });
+        // }
+
+        return list;
     }
 
     // As the list is not expected to be expanded, return slice instead
@@ -237,21 +280,22 @@ pub const Reader = struct {
 
         var end = false;
         while (self.next()) |_| {
-            const malType = self.read_form();
-            // NOTE: append action could mutate the original object as it access
-            // the pointer and expand memory.
-            switch (malType.*) {
-                .SExprEnd => {
-                    // The object finishes its job to indicate end of
-                    // expression, hence destroy here.
-                    // TODO: Further check if this is needed
-                    // defer self.allocator.destroy(malType);
-                    end = true;
-                    break;
-                },
-                else => {
-                    try list.append(self.allocator, malType);
-                },
+            if (self.read_form()) |malType| {
+                // NOTE: append action could mutate the original object as it access
+                // the pointer and expand memory.
+                switch (malType.*) {
+                    .SExprEnd => {
+                        // The object finishes its job to indicate end of
+                        // expression, hence destroy here.
+                        // TODO: Further check if this is needed
+                        // defer self.allocator.destroy(malType);
+                        end = true;
+                        break;
+                    },
+                    else => {
+                        try list.append(self.allocator, malType);
+                    },
+                }
             }
         } else |err| {
             switch (err) {
@@ -285,21 +329,21 @@ pub const Reader = struct {
         const vectorLisp = MalType.new_symbol(self.allocator, "vector");
         try list.append(self.allocator, @constCast(vectorLisp));
         while (self.next()) |_| {
-            const malType = self.read_form();
-
-            // NOTE: append action could mutate the original object as it access
-            // the pointer and expand memory.
-            switch (malType.*) {
-                .VectorExprEnd => {
-                    // The object finishes its job to indicate end of
-                    // expression, hence destroy here.
-                    // defer self.allocator.destroy(malType);
-                    end = true;
-                    break;
-                },
-                else => {
-                    try list.append(self.allocator, malType);
-                },
+            if (self.read_form()) |malType| {
+                // NOTE: append action could mutate the original object as it access
+                // the pointer and expand memory.
+                switch (malType.*) {
+                    .VectorExprEnd => {
+                        // The object finishes its job to indicate end of
+                        // expression, hence destroy here.
+                        // defer self.allocator.destroy(malType);
+                        end = true;
+                        break;
+                    },
+                    else => {
+                        try list.append(self.allocator, malType);
+                    },
+                }
             }
         } else |err| {
             switch (err) {
@@ -545,36 +589,59 @@ test "list case - multiple list case" {
     try testing.expectEqual(2, sub_list2_val.value);
 }
 
-// NOTE: Vector cases are handled in future
-// test "vector case - empty case" {
-//     const allocator = std.testing.allocator;
+test "vector case - empty case" {
+    const allocator = std.testing.allocator;
 
-//     // Vector cases
-//     var empty_vector = Reader.init(allocator, "[]");
-//     defer empty_vector.deinit();
+    // Vector cases
+    var empty_vector = Reader.init(allocator, "[]");
+    defer empty_vector.deinit();
 
-//     const empty_vector_list = empty_vector.ast_root.as_list() catch unreachable;
-//     const empty_vector_list_symbol = empty_vector_list.items[0].as_symbol() catch unreachable;
-//     try testing.expectEqualStrings("vector", empty_vector_list_symbol);
+    const empty_vector_list = empty_vector.ast_root.as_list() catch unreachable;
+    const empty_vector_list_symbol = empty_vector_list.items[0].as_symbol() catch unreachable;
+    try testing.expectEqualStrings("vector", empty_vector_list_symbol);
 
-//     try testing.expectEqual(1, empty_vector_list.items.len);
-// }
+    try testing.expectEqual(1, empty_vector_list.items.len);
+}
 
-// test "vector case - normal case" {
-//     const allocator = std.testing.allocator;
+test "vector case - normal case" {
+    const allocator = std.testing.allocator;
 
-//     var vector_statement = Reader.init(allocator, "[1]");
-//     defer vector_statement.deinit();
+    var vector_statement = Reader.init(allocator, "[1]");
+    defer vector_statement.deinit();
 
-//     try testing.expect(vector_statement.ast_root.* == .list);
+    try testing.expect(vector_statement.ast_root.* == .list);
 
-//     const vector_statement_list = vector_statement.ast_root.as_list() catch unreachable;
-//     const vector_statement_list_symbol = vector_statement_list.items[0].as_symbol() catch unreachable;
-//     try testing.expectEqualStrings("vector", vector_statement_list_symbol);
+    const vector_statement_list = vector_statement.ast_root.as_list() catch unreachable;
+    const vector_statement_list_symbol = vector_statement_list.items[0].as_symbol() catch unreachable;
+    try testing.expectEqualStrings("vector", vector_statement_list_symbol);
 
-//     const vector_statement_list_item_1 = vector_statement_list.items[1].as_number() catch unreachable;
-//     try testing.expectEqual(1, vector_statement_list_item_1.value);
-// }
+    const vector_statement_list_item_1 = vector_statement_list.items[1].as_number() catch unreachable;
+    try testing.expectEqual(1, vector_statement_list_item_1.value);
+}
+
+test "comment case - simple case" {
+    const allocator = std.testing.allocator;
+
+    var comment_statement = Reader.init(allocator, "; This is comment");
+    defer comment_statement.deinit();
+
+    utils.log("comment case", "{any}", .{comment_statement.ast_root}, .{});
+    // try testing.expect(comment_statement.ast_root.* == .comment);
+}
+
+test "comment case - multiple statement" {
+    const allocator = std.testing.allocator;
+
+    var list_statement_with_comment = Reader.init(allocator,
+        \\(def! a
+        \\; This is comment
+        \\  (+ 1 2))
+    );
+    defer list_statement_with_comment.deinit();
+
+    try testing.expect(list_statement_with_comment.ast_root.* == .list);
+    utils.log("comment case", "{any}", .{list_statement_with_comment.ast_root}, .{});
+}
 
 // TODO: How to handle incompleted statement memory management?
 test "incompleted statement case" {

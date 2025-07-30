@@ -142,7 +142,7 @@ pub fn build(b: *std.Build) void {
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
-    const reader_test = b.addTest(.{
+    const reader_tests = b.addTest(.{
         .root_source_file = b.path("./src/reader.zig"),
         .target = target,
         .optimize = optimize,
@@ -151,9 +151,11 @@ pub fn build(b: *std.Build) void {
             .mode = .simple,
         },
     });
-    reader_test.root_module.addImport("logz", logz.module("logz"));
-    reader_test.root_module.addImport("regex", regex.module("regex"));
-    reader_test.root_module.addImport("xev", xev.module("xev"));
+    reader_tests.root_module.addImport("logz", logz.module("logz"));
+    reader_tests.root_module.addImport("regex", regex.module("regex"));
+    reader_tests.root_module.addImport("xev", xev.module("xev"));
+
+    const run_reader_tests = b.addRunArtifact(reader_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
     // the `zig build --help` menu, providing a way for the user to request
@@ -162,9 +164,10 @@ pub fn build(b: *std.Build) void {
 
     _ = run_exe_unit_tests;
     _ = run_fs_tests;
+    // _ = run_general_tests;
 
     // test_step.dependOn(&run_exe_unit_tests.step);
     // test_step.dependOn(&run_fs_tests.step);
     test_step.dependOn(&run_general_tests.step);
-    // test_step.dependOn(&reader_test.step);
+    test_step.dependOn(&run_reader_tests.step);
 }
