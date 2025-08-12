@@ -1,8 +1,14 @@
 const std = @import("std");
 const builtin = @import("builtin");
+
+const logz = @import("logz");
+
 const maxInt = std.math.maxInt;
 const print = std.debug.print;
 const assert = std.debug.assert;
+
+/// Denote the space required for brackets.
+const BRACKET_SPACE = 2;
 
 /// ANSI 3-bit Color code for terminal
 /// The code actually supports more formatting, for simplicity they
@@ -50,10 +56,23 @@ pub const LogOption = struct {
     /// Whether the log is enabled; Shall override other shown-related
     /// properties if disabled.
     enable: bool = true,
+    /// Whether the log will be in external logger.
+    external: bool = false,
 };
 
 /// Log function with color setting
 pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype, option: LogOption) void {
+    var buf: [key.len + BRACKET_SPACE]u8 = undefined;
+    const key_with_bracket = std.fmt.bufPrint(&buf, "[{s}]", .{key}) catch |err| switch (err) {
+        error.NoSpaceLeft => @panic("No space from the buffer."),
+    };
+
+    if (option.external) {
+        logz.debug()
+            .fmt(key_with_bracket, "{s}", .{message})
+            .log();
+    }
+
     const show = option.enable and (!option.test_only or (builtin.is_test and option.test_only));
 
     if (!show) {
@@ -64,7 +83,7 @@ pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype
         set_terminal_color(option.color);
     }
     if (!std.mem.eql(u8, key, "")) {
-        std.debug.print("[{s}]: ", .{key});
+        std.debug.print("{s}: ", .{key_with_bracket});
     }
     std.debug.print(message, args);
     std.debug.print("\n", .{});
