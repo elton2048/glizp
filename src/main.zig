@@ -27,6 +27,7 @@ const Terminal = @import("terminal.zig").Terminal;
 const PluginExample = @import("plugin-example.zig").PluginExample;
 const PluginHistory = @import("plugin-history.zig").PluginHistory;
 const PluginEditing = @import("plugin-editing.zig").PluginEditing;
+const PluginPrint = @import("plugin-print.zig").PluginPrint;
 
 const INIT_CONFIG_FILE = "init.el";
 
@@ -217,10 +218,13 @@ pub const Shell = struct {
         // env.*.registerPlugin(plugin_example) catch @panic("OOM");
 
         const plugin_history = PluginHistory.init(allocator);
-        env.*.registerPlugin(plugin_history) catch @panic("OOM");
+        env.registerPlugin(plugin_history) catch @panic("OOM");
 
         const plugin_editing = PluginEditing.init(allocator, frontend);
-        env.*.registerPlugin(plugin_editing) catch @panic("OOM");
+        env.registerPlugin(plugin_editing) catch @panic("OOM");
+
+        const plugin_print = PluginPrint.init(allocator, frontend);
+        env.registerPlugin(plugin_print) catch @panic("OOM");
 
         const self = allocator.create(Shell) catch @panic("OOM");
         self.* = Shell{
