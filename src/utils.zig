@@ -69,7 +69,7 @@ pub fn log(comptime key: []const u8, comptime message: []const u8, args: anytype
 
     if (option.external) {
         logz.debug()
-            .fmt(key_with_bracket, "{s}", .{message})
+            .fmt(key_with_bracket, message, args)
             .log();
     }
 
