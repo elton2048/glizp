@@ -247,10 +247,28 @@ pub const Shell = struct {
 
         self.logConfig();
 
-        // TODO: For keymap, consider provide default value
-        self.eval_statement("(load \"global-keymap.lisp\")", false);
+        self.setup();
 
         return self;
+    }
+
+    // Setup for the environment
+    // QUESTION: Is it possible to test in environment?
+    fn setup(self: *Shell) void {
+        // Provide load-file function
+        self.eval_statement(
+            \\(def! load-file (lambda (f) (eval (read-string (str "(do " (slurp f) "\nnil)")))))
+        , false);
+
+        // Load keymap to the environment
+        // TODO: For keymap, consider provide default value
+        self.eval_statement(
+            \\(load-file "global-keymap.lisp")
+        , false);
+
+        self.eval_statement(
+            \\(load-file "init.el")
+        , false);
     }
 
     /// Log config info
@@ -271,6 +289,9 @@ pub const Shell = struct {
     /// Eval statement directly, worked as a macro
     // TODO: Consider adding error handling
     fn eval_statement(self: Shell, statement: []const u8, print: bool) void {
+        // NOTE: Doesn't handle memory management well now, it is best
+        // to copy the lisp within the reader result and deinit it
+        // afterwards
         const statement_reader = parsing_statement(statement);
 
         // TODO: Handle deinit the result
@@ -289,6 +310,9 @@ pub const Shell = struct {
     }
 
     fn eval_statement_and_return(self: Shell, statement: []const u8) []u8 {
+        // NOTE: Doesn't handle memory management well now, it is best
+        // to copy the lisp within the reader result and deinit it
+        // afterwards
         const statement_reader = parsing_statement(statement);
 
         // TODO: Handle deinit the result

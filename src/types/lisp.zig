@@ -108,6 +108,18 @@ pub const FunctionData = struct {
     reference_count: ReferenceCountType = 1,
 };
 
+/// Comment data is not supported, all related code in this file
+/// are not used.
+/// Comment does not exist in parsed AST, they are null value in parsing
+/// token given.
+pub const CommentData = struct {
+    allocator: std.mem.Allocator,
+    data: ArrayList(u8),
+    /// Denote which layer is the comment to have different style.
+    layer: u8 = 1,
+    reference_count: ReferenceCountType = 1,
+};
+
 pub const MalType = union(enum) {
     boolean: bool,
     number: NumberData,
@@ -121,6 +133,7 @@ pub const MalType = union(enum) {
     symbol: SymbolData,
 
     function: FunctionData,
+    comment: CommentData,
 
     SExprEnd,
     VectorExprEnd,
@@ -172,27 +185,36 @@ pub const MalType = union(enum) {
                     // TODO: Need level control, limit or better formatting?
                     try std.fmt.format(writer, "count: {d}", .{list.reference_count});
                     try std.fmt.format(writer, ".list: ", .{});
-                    for (list.data.items, 0..) |item, i| {
-                        try writer.writeAll("{ ");
-                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
-                        try writer.writeAll(" }");
+                    if (list.reference_count > 0) {
+                        for (list.data.items, 0..) |item, i| {
+                            try writer.writeAll("{ ");
+                            try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                            try writer.writeAll(" }");
 
-                        try std.fmt.format(writer, "pointer: {*}", .{item});
+                            try std.fmt.format(writer, "pointer: {*}", .{item});
+                        }
                     }
                 },
                 .vector => |vector| {
                     try std.fmt.format(writer, "count: {d}", .{vector.reference_count});
                     try std.fmt.format(writer, ".vector: ", .{});
-                    for (vector.data.items, 0..) |item, i| {
-                        try writer.writeAll("{ ");
-                        try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
-                        try writer.writeAll(" }");
+                    if (vector.reference_count > 0) {
+                        for (vector.data.items, 0..) |item, i| {
+                            try writer.writeAll("{ ");
+                            try std.fmt.format(writer, "index: {d}; {any}", .{ i, item });
+                            try writer.writeAll(" }");
+                        }
                     }
                 },
                 .function => |func| {
                     try std.fmt.format(writer, "count: {d}", .{func.reference_count});
                     try std.fmt.format(writer, ".function: ", .{});
                     try std.fmt.format(writer, "{any}", .{func.data});
+                },
+                .comment => |comment| {
+                    try std.fmt.format(writer, "count: {d}", .{comment.reference_count});
+                    try std.fmt.format(writer, ".comment: ", .{});
+                    try std.fmt.format(writer, "{s}", .{comment.data.items});
                 },
                 // NOTE: This is no way to use default format now as
                 // the implementation checks if the struct has "format"
@@ -319,6 +341,21 @@ pub const MalType = union(enum) {
         return mal_ptr;
     }
 
+    pub fn new_comment(allocator: std.mem.Allocator, data: ArrayList(u8)) *MalType {
+        const mal_ptr = allocator.create(MalType) catch @panic("OOM");
+
+        mal_ptr.* = .{
+            .comment = .{
+                .allocator = allocator,
+                // NOTE: Hardcoded for layer 1 now.
+                .layer = 1,
+                .data = data,
+            },
+        };
+
+        return mal_ptr;
+    }
+
     pub fn deinit(self: *MalType) void {
         utils.log("DEINIT entry", "{*}; {any}", .{ self, self }, .{ .test_only = true });
 
@@ -350,6 +387,8 @@ pub const MalType = union(enum) {
             },
             .vector => |*vector| {
                 for (vector.data.items) |item| {
+                    utils.log("deinit vector", "{any}", .{item}, .{ .enable = false });
+
                     item.decref();
                 }
                 vector.data.deinit(vector.allocator);
@@ -361,6 +400,13 @@ pub const MalType = union(enum) {
                 func.data.deinit();
 
                 func.allocator.destroy(self);
+            },
+            .comment => |*comment| {
+                const allocator = comment.allocator;
+
+                comment.data.deinit(allocator);
+
+                allocator.destroy(self);
             },
             else => {},
         }
@@ -383,11 +429,13 @@ pub const MalType = union(enum) {
     /// should also be copied into designated allocator.
     /// Not being used. Consider remove this.
     pub fn copy(self: *MalType, allocator: std.mem.Allocator) *MalType {
-        utils.log("lisp", "COPY", .{}, .{});
-        // const new_object = allocator.create(MalType) catch @panic("OOM");
+        utils.log("lisp", "COPY", .{}, .{ .test_only = true });
 
         var new_object: *MalType = undefined;
         switch (self.*) {
+            .symbol => |symbol| {
+                new_object = MalType.new_symbol(allocator, symbol.data);
+            },
             .string => |string| {
                 const new_data = string.data.clone(allocator) catch @panic("");
 
@@ -401,10 +449,34 @@ pub const MalType = union(enum) {
                     .reference_count = number.reference_count,
                 } };
             },
+            .list => |list| {
+                var copied_list: List = .empty;
+                for (list.data.items) |item| {
+                    const copied_item = item.copy(allocator);
+
+                    copied_list.append(allocator, copied_item) catch unreachable;
+                }
+
+                new_object = MalType.new_list_ptr(allocator, copied_list);
+            },
+            .vector => |vector| {
+                var copied_vector: List = .empty;
+                for (vector.data.items) |item| {
+                    const copied_item = item.copy(allocator);
+
+                    copied_vector.append(allocator, copied_item) catch unreachable;
+                }
+
+                new_object = MalType.new_vector_ptr(allocator, copied_vector);
+            },
+            .boolean => |boolean| {
+                new_object = MalType.new_boolean_ptr(boolean);
+            },
             else => {
                 new_object = allocator.create(MalType) catch @panic("OOM");
                 new_object.* = self.*;
-                // @panic("Not yet implemented");
+                utils.log("COPY", "{any}", .{self}, .{});
+                @panic("Not yet implemented");
             },
         }
 
@@ -590,6 +662,16 @@ pub const MalType = union(enum) {
 
                 func.reference_count -= 1;
                 if (func.reference_count == 0) {
+                    self.deinit();
+                }
+            },
+            .comment => |*l| {
+                if (l.reference_count == 0) {
+                    return;
+                }
+
+                l.reference_count -= 1;
+                if (l.reference_count == 0) {
                     self.deinit();
                 }
             },
